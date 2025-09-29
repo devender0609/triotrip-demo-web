@@ -1,0 +1,143 @@
+/* app/globals.css */
+
+/* CSS reset-ish */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html, body {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+}
+
+/* App baseline */
+.tt-body {
+  --bg1: #f8fafc;       /* slate-50 */
+  --bg2: #ffffff;       /* white */
+  --text: #0f172a;      /* slate-900 */
+  --muted: #475569;     /* slate-600 */
+  --brand: #0ea5e9;     /* sky-500 */
+  --brand-2: #06b6d4;   /* cyan-500 */
+  --line: #e2e8f0;      /* slate-200 */
+
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #e0f2fe 0%, rgba(224,242,254,0) 60%),
+    radial-gradient(1000px 500px at 110% 10%, #cffafe 0%, rgba(207,250,254,0) 60%),
+    var(--bg1);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.4;
+}
+
+.tt-main {
+  min-height: 100vh;
+  width: 100%;
+  max-width: 1200px;
+  padding: 24px 20px 60px;
+  margin: 0 auto;
+}
+
+/* Utility buttons (used by your components) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .06s ease, box-shadow .06s ease;
+}
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(2, 132, 199, 0.15);
+}
+.btn.primary {
+  background: linear-gradient(90deg, var(--brand-2), var(--brand));
+  border: none;
+  color: #fff;
+}
+.btn.ghost {
+  background: #fff;
+  color: var(--brand);
+  border-color: #7dd3fc;
+}
+.btn.small {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+/* Card baseline (your ResultCard already has styled-jsx; this helps global consistency) */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 14px 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
+/* Form inputs baseline (to improve contrast if your dropdown looked too dark) */
+input, select, button, textarea {
+  font: inherit;
+}
+input[type="text"], input[type="date"], .select, .input {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+}
+input[type="text"]:focus, input[type="date"]:focus, .select:focus, .input:focus {
+  border-color: #7dd3fc;
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.35);
+}
+
+/* Simple grid helpers if you need full-width templates */
+.container-wide {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 1024px) {
+  .container-wide {
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+  }
+}
+
+/* Chips/pills */
+.chip {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+  margin-right: 6px;
+}
+/* Buttons: focus & disabled states */
+.btn:focus-visible {
+  outline: 3px solid rgba(125, 211, 252, 0.65);
+  outline-offset: 2px;
+}
+.btn:disabled,
+.btn[disabled] {
+  opacity: .5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Selects: ensure text/arrow contrast on Windows */
+select {
+  appearance: auto;
+  color: var(--text);
+  background-color: #fff;
+}
