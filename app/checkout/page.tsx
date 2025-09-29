@@ -1,24 +1,25 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
 
+import React, { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
 
 type Title = "Mr" | "Mrs" | "Ms" | "Mx" | "Dr";
 type Gender = "male" | "female" | "unspecified";
 
-export default function CheckoutPage() {
+// >>> the inner component is where we call useSearchParams
+function CheckoutInner() {
   const router = useRouter();
   const params = useSearchParams();
 
   // from deeplink
-  const flightId    = params.get("flightId")    || "";
-  const currency    = (params.get("currency")   || "USD").toUpperCase();
-  const totalRaw    = Number(params.get("total") || "");
-  const paxRaw      = Number(params.get("pax") || "1");
-  const total = Number.isFinite(totalRaw) ? totalRaw : undefined;
-  const pax = Number.isFinite(paxRaw) && paxRaw > 0 ? paxRaw : 1;
+  const flightId = params.get("flightId") || "";
+  const currency = (params.get("currency") || "USD").toUpperCase();
+  const totalRaw = Number(params.get("total") || "");
+  const paxRaw   = Number(params.get("pax") || "1");
+  const total    = Number.isFinite(totalRaw) ? totalRaw : undefined;
+  const pax      = Number.isFinite(paxRaw) && paxRaw > 0 ? paxRaw : 1;
 
   const fmt = useMemo(() => {
     try { return new Intl.NumberFormat(undefined, { style: "currency", currency }); }
@@ -26,8 +27,8 @@ export default function CheckoutPage() {
   }, [currency]);
 
   // contact
-  const [email, setEmail]   = useState("");
-  const [phone, setPhone]   = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
 
   // passenger (adult 1)
   const [title, setTitle]   = useState<Title>("Mr");
@@ -37,15 +38,15 @@ export default function CheckoutPage() {
   const [gender, setGender] = useState<Gender>("male");
 
   const canSubmit =
-    flightId &&
-    email.trim() &&
-    first.trim() &&
-    last.trim() &&
-    dob; // keep it simple for sandbox
+    !!flightId &&
+    !!email.trim() &&
+    !!first.trim() &&
+    !!last.trim() &&
+    !!dob;
 
   async function handlePay() {
     if (!canSubmit) return;
-    // This is still sandbox â€” stub server hook youâ€™ll wire to Duffel + Stripe later.
+
     try {
       const res = await fetch("/api/checkout/sandbox", {
         method: "POST",
@@ -57,17 +58,22 @@ export default function CheckoutPage() {
           pax,
           contact: { email, phone },
           passengers: [{
-            title, first_name: first, last_name: last,
-            date_of_birth: dob, gender
+            title,
+            first_name: first,
+            last_name:  last,
+            date_of_birth: dob,
+            gender
           }],
         }),
       });
+
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Checkout failed");
       }
-      alert("Sandbox: this is where youâ€™d be redirected to Stripe Checkout.");
-      // router.push("/success"); // when you have a success page
+
+      alert("Sandbox: this is where you’d be redirected to Stripe Checkout.");
+      // router.push("/success"); // later, when you add a success page
     } catch (e: any) {
       alert(e?.message || "Checkout failed");
     }
@@ -76,18 +82,18 @@ export default function CheckoutPage() {
   return (
     <main style={{ maxWidth: 960, margin: "16px auto", padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <button onClick={() => router.back()} className="btn-ghost">â† Back</button>
+        <button onClick={() => router.back()} className="btn-ghost">← Back</button>
         <Link href="/" className="home-link">TripTrio Home</Link>
       </div>
 
       <section className="card">
         <h1 className="title">Checkout</h1>
-        <p className="sub">Enter passenger and contact details. Weâ€™ll create the order in Duffel (sandbox).</p>
+        <p className="sub">Enter passenger and contact details. We’ll create the order in Duffel (sandbox).</p>
 
         <div className="total">
           <b>Total:</b>{" "}
-          {total !== undefined ? <span className="amt">{fmt.format(Math.round(total))}</span> : "â€”"}
-          <span className="meta">{pax > 1 ? `  â€¢  ${pax} passenger(s)` : ""}</span>
+          {total !== undefined ? <span className="amt">{fmt.format(Math.round(total))}</span> : "—"}
+          <span className="meta">{pax > 1 ? `  •  ${pax} passenger(s)` : ""}</span>
         </div>
 
         <div className="block">
@@ -101,7 +107,7 @@ export default function CheckoutPage() {
             />
             <input
               type="tel"
-              placeholder="Phone (+1â€¦)"
+              placeholder="Phone (+1…)"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
             />
@@ -112,7 +118,9 @@ export default function CheckoutPage() {
           <div className="block-title">Passenger (Adult)</div>
           <div className="grid grid-4">
             <select value={title} onChange={(e) => setTitle(e.target.value as Title)}>
-              {["Mr", "Mrs", "Ms", "Mx", "Dr"].map((t) => <option key={t} value={t as Title}>{t}</option>)}
+              {["Mr", "Mrs", "Ms", "Mx", "Dr"].map((t) => (
+                <option key={t} value={t as Title}>{t}</option>
+              ))}
             </select>
             <input placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} />
             <input placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} />
@@ -170,3 +178,13 @@ export default function CheckoutPage() {
     </main>
   );
 }
+
+// >>> page exports a Suspense-wrapped inner component
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={null}>
+      <CheckoutInner />
+    </Suspense>
+  );
+}
+

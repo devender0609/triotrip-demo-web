@@ -1,6 +1,6 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+
 
 import React, { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
@@ -33,3 +33,4 @@ export default function CompletePage() {
     </Suspense>
   );
 }
+

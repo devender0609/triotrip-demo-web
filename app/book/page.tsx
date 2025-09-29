@@ -1,6 +1,6 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+
 
 import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -380,3 +380,4 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 800,
   color: "#334155",
 };
+

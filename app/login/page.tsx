@@ -1,6 +1,6 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -142,3 +142,4 @@ const styles = `
 .hint{margin-top:10px; color:#475569; text-align:center;}
 .signed p{margin:0 0 8px 0;}
 `;
+
