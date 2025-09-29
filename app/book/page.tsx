@@ -1,9 +1,10 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
+import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useMemo, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
 
@@ -15,7 +16,7 @@ type Pax = {
   born_on: string; // YYYY-MM-DD
 };
 
-export default function BookPage() {
+function BookInner() {
   const params = useSearchParams();
   const router = useRouter();
 
@@ -42,7 +43,6 @@ export default function BookPage() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // init passengers state
   const [passengers, setPassengers] = useState<Pax[]>(
     Array.from({ length: paxCount }).map(() => ({
       title: "",
@@ -126,7 +126,6 @@ export default function BookPage() {
       const id = j?.data?.id || j?.id || null;
       setOrderId(id);
       if (!id) setError("Order created, but no order ID returned.");
-      // Optionally: router.push(`/book/confirmation?id=${id}`)
     } catch (e: any) {
       setError(e?.message || "Could not create order.");
     } finally {
@@ -138,7 +137,7 @@ export default function BookPage() {
     <main style={{ maxWidth: 980, margin: "20px auto", padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <button onClick={() => router.back()} className="btn" style={{ height: 36 }}>
-          â† Back
+          ← Back
         </button>
         <Link href="/" className="btn ghost" style={{ marginLeft: "auto", height: 36 }}>
           TripTrio Home
@@ -151,7 +150,6 @@ export default function BookPage() {
           Enter passenger details and confirm to create a Duffel sandbox order.
         </p>
 
-        {/* Summary */}
         <section
           style={{
             marginTop: 12,
@@ -162,10 +160,10 @@ export default function BookPage() {
           }}
         >
           <div style={{ display: "grid", gap: 6 }}>
-            <div><b>Flight ID:</b> {flightId || "â€”"}</div>
-            <div><b>Carrier:</b> {carrier || "â€”"}</div>
-            <div><b>Route:</b> {origin || "â€”"} â†’ {destination || "â€”"}</div>
-            <div><b>Depart:</b> {depart || "â€”"}</div>
+            <div><b>Flight ID:</b> {flightId || "—"}</div>
+            <div><b>Carrier:</b> {carrier || "—"}</div>
+            <div><b>Route:</b> {origin || "—"} → {destination || "—"}</div>
+            <div><b>Depart:</b> {depart || "—"}</div>
             {ret ? <div><b>Return:</b> {ret}</div> : null}
             {hotel ? <div><b>Hotel:</b> {hotel}</div> : null}
           </div>
@@ -182,16 +180,15 @@ export default function BookPage() {
             }}
           >
             <div style={{ color: "#64748b", fontWeight: 700 }}>
-              {cabin ? `Cabin: ${cabin} â€¢ ` : ""}Pax: {paxCount}
+              {cabin ? `Cabin: ${cabin} • ` : ""}Pax: {paxCount}
             </div>
             <div style={{ fontSize: 22, fontWeight: 900 }}>
-              {total !== undefined ? fmt.format(Math.round(total)) : "â€”"}
+              {total !== undefined ? fmt.format(Math.round(total)) : "—"}
             </div>
             <div style={{ color: "#64748b", fontWeight: 700 }}>Total ({currency})</div>
           </div>
         </section>
 
-        {/* Contact */}
         <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
           <h3 style={{ margin: 0, fontWeight: 900 }}>Contact</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -218,7 +215,6 @@ export default function BookPage() {
           </div>
         </section>
 
-        {/* Passengers */}
         <section style={{ marginTop: 18, display: "grid", gap: 14 }}>
           <h3 style={{ margin: 0, fontWeight: 900 }}>Passenger details</h3>
 
@@ -303,7 +299,6 @@ export default function BookPage() {
           ))}
         </section>
 
-        {/* Errors / Success */}
         {error && (
           <div style={{ marginTop: 12, padding: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", borderRadius: 10, fontWeight: 800 }}>
             {error}
@@ -311,11 +306,10 @@ export default function BookPage() {
         )}
         {orderId && (
           <div style={{ marginTop: 12, padding: 10, border: "1px solid #bbf7d0", background: "#ecfdf5", color: "#065f46", borderRadius: 10, fontWeight: 800 }}>
-            âœ… Order created (sandbox). Duffel Order ID: <code>{orderId}</code>
+            ✅ Order created (sandbox). Duffel Order ID: <code>{orderId}</code>
           </div>
         )}
 
-        {/* Actions */}
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             onClick={payAndBook}
@@ -330,7 +324,7 @@ export default function BookPage() {
               background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
             }}
           >
-            {submitting ? "Processingâ€¦" : "Pay (sandbox) & Book"}
+            {submitting ? "Processing…" : "Pay (sandbox) & Book"}
           </button>
 
           <a
@@ -365,6 +359,14 @@ export default function BookPage() {
   );
 }
 
+export default function BookPage() {
+  return (
+    <Suspense fallback={null}>
+      <BookInner />
+    </Suspense>
+  );
+}
+
 const inputStyle: React.CSSProperties = {
   border: "1px solid #e2e8f0",
   borderRadius: 10,
@@ -378,4 +380,3 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 800,
   color: "#334155",
 };
-

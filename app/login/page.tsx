@@ -1,14 +1,15 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-import { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Auth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { getSupa } from "../../lib/auth/supabase";
 
-export default function LoginPage() {
+function LoginInner() {
   const supa = getSupa();
   const router = useRouter();
   const params = useSearchParams();
@@ -53,7 +54,7 @@ export default function LoginPage() {
             <code> NEXT_PUBLIC_SUPABASE_ANON_KEY </code> are set in
             <code> web/.env.local</code>.
           </p>
-          <Link href="/" className="btn">â† Back to home</Link>
+          <Link href="/" className="btn">← Back to home</Link>
         </div>
         <style jsx>{styles}</style>
       </main>
@@ -71,7 +72,7 @@ export default function LoginPage() {
         <h1 className="title">Login</h1>
 
         {loading ? (
-          <p>Checking sessionâ€¦</p>
+          <p>Checking session…</p>
         ) : userEmail ? (
           <div className="signed">
             <p>Signed in as <b>{userEmail}</b></p>
@@ -86,29 +87,28 @@ export default function LoginPage() {
           supabaseClient={supa}
           appearance={{
             theme: ThemeSupa,
-            variables: {
-              default: {
-                colors: { brand: "#0ea5e9", brandAccent: "#06b6d4" },
-              },
-            },
+            variables: { default: { colors: { brand: "#0ea5e9", brandAccent: "#06b6d4" } } },
           }}
-          providers={["google"]}   // GitHub removed
-          // keep email/password visible (donâ€™t set onlyThirdPartyProviders)
-          redirectTo={
-            typeof window !== "undefined"
-              ? window.location.origin + "/login"
-              : undefined
-          }
+          providers={["google"]}
+          redirectTo={typeof window !== "undefined" ? window.location.origin + "/login" : undefined}
         />
 
         {!userEmail && (
           <p className="hint">
-            After signing in youâ€™ll be redirected{nextPath ? ` to ${nextPath}` : ""}.
+            After signing in you’ll be redirected{nextPath ? ` to ${nextPath}` : ""}.
           </p>
         )}
       </div>
       <style jsx>{styles}</style>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }
 
@@ -142,4 +142,3 @@ const styles = `
 .hint{margin-top:10px; color:#475569; text-align:center;}
 .signed p{margin:0 0 8px 0;}
 `;
-

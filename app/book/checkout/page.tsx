@@ -1,13 +1,14 @@
 ﻿"use client";
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
+import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type OfferInfo = { total_amount: string; total_currency: string };
 
-export default function CheckoutPage() {
+function CheckoutInner() {
   const params = useSearchParams();
   const router = useRouter();
   const flightId = params.get("flightId") || "";
@@ -51,9 +52,7 @@ export default function CheckoutPage() {
       const body = {
         offer_id: flightId,
         contact: { email, phone_number: phone },
-        passengers: [{
-          title, given_name: first, family_name: last, born_on: dob, gender,
-        }],
+        passengers: [{ title, given_name: first, family_name: last, born_on: dob, gender }],
       };
       const r = await fetch(`${process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"}/duffel/order`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -74,7 +73,7 @@ export default function CheckoutPage() {
     <main style={{ maxWidth: 880, margin: "20px auto", padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <a href="/book" style={{ border: "1px solid #e2e8f0", borderRadius: 8, height: 36, lineHeight: "36px", padding: "0 10px", textDecoration: "none" }}>
-          â† Back
+          ← Back
         </a>
         <Link href="/" style={{ marginLeft: "auto", textDecoration: "none", fontWeight: 900, color: "#0ea5e9" }}>
           TripTrio Home
@@ -84,7 +83,7 @@ export default function CheckoutPage() {
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
         <h1 style={{ marginTop: 0, marginBottom: 8, fontWeight: 900 }}>Checkout</h1>
         <p style={{ color: "#475569", marginTop: 0 }}>
-          Enter passenger and contact details. Weâ€™ll create the order in Duffel (sandbox).
+          Enter passenger and contact details. We’ll create the order in Duffel (sandbox).
         </p>
 
         {offer && <div style={{ marginBottom: 12, fontWeight: 800 }}>Total: {offer.total_amount} {offer.total_currency}</div>}
@@ -95,7 +94,7 @@ export default function CheckoutPage() {
           <div style={{ display: "grid", gap: 8 }}>
             <input placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
                    style={{ height: 38, border: "1px solid #e5e7eb", borderRadius: 8, padding: "0 10px" }} />
-            <input placeholder="Phone (+1â€¦)" value={phone} onChange={e=>setPhone(e.target.value)}
+            <input placeholder="Phone (+1…)" value={phone} onChange={e=>setPhone(e.target.value)}
                    style={{ height: 38, border: "1px solid #e5e7eb", borderRadius: 8, padding: "0 10px" }} />
           </div>
         </fieldset>
@@ -126,10 +125,17 @@ export default function CheckoutPage() {
                 style={{ height: 44, padding: "0 16px", border: "none", borderRadius: 10, fontWeight: 900,
                          color: "#fff", background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
                          opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer" }}>
-          {loading ? "Bookingâ€¦" : "Pay (sandbox) & Book"}
+          {loading ? "Booking…" : "Pay (sandbox) & Book"}
         </button>
       </div>
     </main>
   );
 }
 
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={null}>
+      <CheckoutInner />
+    </Suspense>
+  );
+}
