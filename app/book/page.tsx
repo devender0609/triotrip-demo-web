@@ -7,14 +7,24 @@ import { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
+/**
+ * Prefer Vercel/App Routes under /api.
+ * If you also run an external server, expose its base as NEXT_PUBLIC_WEB_SERVER_BASE.
+ * Both forms work:
+ *  - "" (empty)  -> /api/duffel/order
+ *  - "https://your-domain/api" -> https://your-domain/api/duffel/order
+ */
+const WEB_SERVER_BASE =
+  (process.env.NEXT_PUBLIC_WEB_SERVER_BASE || "").replace(/\/$/, "");
+const api = (path: string) =>
+  `${WEB_SERVER_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
 type Pax = {
   title: "mr" | "mrs" | "ms" | "";
   given_name: string;
   family_name: string;
   gender: "m" | "f" | "x" | "";
-  born_on: string;
+  born_on: string; // YYYY-MM-DD
 };
 
 export default function BookPage() {
@@ -66,7 +76,10 @@ function Inner() {
     try {
       return new Intl.NumberFormat(undefined, { style: "currency", currency });
     } catch {
-      return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+      });
     }
   }, [currency]);
 
@@ -91,36 +104,41 @@ function Inner() {
 
   function validate(): string | null {
     if (!flightId) return "Missing flight ID.";
-    if (!contactEmail || !/.+@.+\..+/.test(contactEmail)) return "Enter a valid contact email.";
+    if (!contactEmail || !/.+@.+\..+/.test(contactEmail))
+      return "Enter a valid contact email.";
     if (!contactPhone) return "Enter a contact phone number.";
     for (let i = 0; i < passengers.length; i++) {
       const p = passengers[i];
-      if (!p.given_name) return `Passenger ${i + 1}: first name is required.`;
-      if (!p.family_name) return `Passenger ${i + 1}: last name is required.`;
+      if (!p.given_name.trim()) return `Passenger ${i + 1}: first name is required.`;
+      if (!p.family_name.trim()) return `Passenger ${i + 1}: last name is required.`;
       if (!p.title) return `Passenger ${i + 1}: title is required.`;
       if (!p.gender) return `Passenger ${i + 1}: gender is required.`;
       if (!p.born_on) return `Passenger ${i + 1}: Date of birth is required.`;
-      if (!validISODate(p.born_on)) return `Passenger ${i + 1}: Date of birth must be YYYY-MM-DD.`;
+      if (!validISODate(p.born_on))
+        return `Passenger ${i + 1}: Date of birth must be YYYY-MM-DD.`;
     }
     return null;
   }
 
   async function payAndBook() {
+    if (submitting) return;
     setError(null);
     setOrderId(null);
+
     const v = validate();
     if (v) {
       setError(v);
       return;
     }
+
     try {
       setSubmitting(true);
-      const r = await fetch(`${API_BASE}/duffel/order`, {
+      const r = await fetch(api("/duffel/order"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           offer_id: flightId,
-          contact: { email: contactEmail, phone_number: contactPhone },
+          contact: { email: contactEmail.trim(), phone_number: contactPhone.trim() },
           passengers: passengers.map((p) => ({
             title: p.title,
             given_name: p.given_name.trim(),
@@ -130,11 +148,13 @@ function Inner() {
           })),
         }),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "Checkout failed");
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || j?.message || "Checkout failed.");
+
       const id = j?.data?.id || j?.id || null;
       setOrderId(id);
-      if (!id) setError("Order created, but no order ID returned.");
+      if (!id) setError("Order created, but no order ID was returned.");
     } catch (e: any) {
       setError(e?.message || "Could not create order.");
     } finally {
