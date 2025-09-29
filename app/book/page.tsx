@@ -1,8 +1,9 @@
-﻿"use client";
-export const dynamic = 'force-dynamic';
+﻿// app/book/page.tsx
+"use client";
+export const dynamic = "force-dynamic";
+export const revalidate = false;
 
-
-import React, { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -13,24 +14,32 @@ type Pax = {
   given_name: string;
   family_name: string;
   gender: "m" | "f" | "x" | "";
-  born_on: string; // YYYY-MM-DD
+  born_on: string;
 };
 
-function BookInner() {
+export default function BookPage() {
+  return (
+    <Suspense fallback={null}>
+      <Inner />
+    </Suspense>
+  );
+}
+
+function Inner() {
   const params = useSearchParams();
   const router = useRouter();
 
-  const flightId    = params.get("flightId")    || "";
-  const carrier     = params.get("carrier")     || "";
-  const origin      = params.get("origin")      || "";
+  const flightId = params.get("flightId") || "";
+  const carrier = params.get("carrier") || "";
+  const origin = params.get("origin") || "";
   const destination = params.get("destination") || "";
-  const depart      = params.get("depart")      || "";
-  const ret         = params.get("return")      || "";
-  const hotel       = params.get("hotel")       || "";
-  const currency    = (params.get("currency")   || "USD").toUpperCase();
-  const totalRaw    = params.get("total");
-  const cabin       = (params.get("cabin") || "").toUpperCase();
-  const paxRaw      = params.get("pax");
+  const depart = params.get("depart") || "";
+  const ret = params.get("return") || "";
+  const hotel = params.get("hotel") || "";
+  const currency = (params.get("currency") || "USD").toUpperCase();
+  const totalRaw = params.get("total");
+  const cabin = (params.get("cabin") || "").toUpperCase();
+  const paxRaw = params.get("pax");
 
   const paxCount = useMemo(() => {
     const n = Number(paxRaw);
@@ -150,6 +159,7 @@ function BookInner() {
           Enter passenger details and confirm to create a Duffel sandbox order.
         </p>
 
+        {/* Summary */}
         <section
           style={{
             marginTop: 12,
@@ -189,6 +199,7 @@ function BookInner() {
           </div>
         </section>
 
+        {/* Contact */}
         <section style={{ marginTop: 16, display: "grid", gap: 8 }}>
           <h3 style={{ margin: 0, fontWeight: 900 }}>Contact</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -215,6 +226,7 @@ function BookInner() {
           </div>
         </section>
 
+        {/* Passengers */}
         <section style={{ marginTop: 18, display: "grid", gap: 14 }}>
           <h3 style={{ margin: 0, fontWeight: 900 }}>Passenger details</h3>
 
@@ -291,7 +303,9 @@ function BookInner() {
                     onChange={(e) => updatePax(i, { born_on: e.target.value })}
                     style={inputStyle}
                     placeholder="YYYY-MM-DD"
-                    max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10)}
+                    max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+                      .toISOString()
+                      .slice(0, 10)}
                   />
                 </label>
               </div>
@@ -299,17 +313,39 @@ function BookInner() {
           ))}
         </section>
 
+        {/* Errors / Success */}
         {error && (
-          <div style={{ marginTop: 12, padding: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", borderRadius: 10, fontWeight: 800 }}>
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              border: "1px solid #fecaca",
+              background: "#fef2f2",
+              color: "#991b1b",
+              borderRadius: 10,
+              fontWeight: 800,
+            }}
+          >
             {error}
           </div>
         )}
         {orderId && (
-          <div style={{ marginTop: 12, padding: 10, border: "1px solid #bbf7d0", background: "#ecfdf5", color: "#065f46", borderRadius: 10, fontWeight: 800 }}>
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              border: "1px solid #bbf7d0",
+              background: "#ecfdf5",
+              color: "#065f46",
+              borderRadius: 10,
+              fontWeight: 800,
+            }}
+          >
             ✅ Order created (sandbox). Duffel Order ID: <code>{orderId}</code>
           </div>
         )}
 
+        {/* Actions */}
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             onClick={payAndBook}
@@ -348,22 +384,27 @@ function BookInner() {
 
       <style jsx>{`
         .btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          border: 1px solid #e2e8f0; background: #fff; color: #0f172a;
-          padding: 0 10px; border-radius: 8px; font-weight: 800; text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border: 1px solid #e2e8f0;
+          background: #fff;
+          color: #0f172a;
+          padding: 0 10px;
+          border-radius: 8px;
+          font-weight: 800;
+          text-decoration: none;
         }
-        .btn.ghost { color: #0ea5e9; border-color: #bae6fd; }
-        input, select { height: 40px; }
+        .btn.ghost {
+          color: #0ea5e9;
+          border-color: #bae6fd;
+        }
+        input,
+        select {
+          height: 40px;
+        }
       `}</style>
     </main>
-  );
-}
-
-export default function BookPage() {
-  return (
-    <Suspense fallback={null}>
-      <BookInner />
-    </Suspense>
   );
 }
 
@@ -380,4 +421,3 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 800,
   color: "#334155",
 };
-
