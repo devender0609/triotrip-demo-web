@@ -76,10 +76,7 @@ function Inner() {
     try {
       return new Intl.NumberFormat(undefined, { style: "currency", currency });
     } catch {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
-      });
+      return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
     }
   }, [currency]);
 
@@ -104,8 +101,7 @@ function Inner() {
 
   function validate(): string | null {
     if (!flightId) return "Missing flight ID.";
-    if (!contactEmail || !/.+@.+\..+/.test(contactEmail))
-      return "Enter a valid contact email.";
+    if (!contactEmail || !/.+@.+\..+/.test(contactEmail)) return "Enter a valid contact email.";
     if (!contactPhone) return "Enter a contact phone number.";
     for (let i = 0; i < passengers.length; i++) {
       const p = passengers[i];
@@ -114,8 +110,7 @@ function Inner() {
       if (!p.title) return `Passenger ${i + 1}: title is required.`;
       if (!p.gender) return `Passenger ${i + 1}: gender is required.`;
       if (!p.born_on) return `Passenger ${i + 1}: Date of birth is required.`;
-      if (!validISODate(p.born_on))
-        return `Passenger ${i + 1}: Date of birth must be YYYY-MM-DD.`;
+      if (!validISODate(p.born_on)) return `Passenger ${i + 1}: Date of birth must be YYYY-MM-DD.`;
     }
     return null;
   }
