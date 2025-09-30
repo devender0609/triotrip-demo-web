@@ -3,40 +3,69 @@
 import { useEffect, useRef, useState } from "react";
 
 type Suggestion = {
-  code: string;   // IATA
+  code?: string;   // IATA (may be missing for some city-only results)
   name: string;
-  city: string;
-  country: string;
-  label: string;  // e.g. "BOS — Logan International (Boston, US)"
+  city?: string;
+  country?: string;
+  label: string;   // what we display
 };
 
-/** Fetch places from our server proxy (app/api/places/route.ts) */
-async function fetchPlaces(term: string): Promise<Suggestion[]> {
-  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const j = await res.json();
-  const items = Array.isArray(j?.data) ? j.data : [];
+function toSuggestion(p: any): Suggestion | null {
+  // Duffel (beta) response commonly has: iata_code, name, city_name, country_name
+  const code = p?.iata_code || "";
+  const name = p?.name || p?.airport_name || p?.city_name || "";
+  const city = p?.city_name || p?.city?.name || p?.municipality || "";
+  const country = p?.country_name || p?.country?.name || p?.country || "";
 
-  return items.map((p: any) => {
-    const code = p.iata_code || "";
-    const name = p.name || p.airport_name || p.city_name || "";
-    const city = p.city_name || p.city?.name || p.municipality || "";
-    const country = p.country_name || p.country?.name || p.country || "";
-    const label =
-      (code ? `${code} — ` : "") +
-      name +
-      (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
-    return { code, name, city, country, label };
-  });
+  if (!name) return null;
+
+  const label =
+    (code ? `${code} — ` : "") +
+    name +
+    (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
+
+  return { code: code || undefined, name, city: city || undefined, country: country || undefined, label };
+}
+
+async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; error?: string }> {
+  try {
+    const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
+    const text = await res.text(); // read raw for better diagnostics
+    let json: any = {};
+    try { json = text ? JSON.parse(text) : {}; } catch { /* ignore */ }
+
+    // Duffel returns { data: [...] }
+    const raw = Array.isArray(json?.data) ? json.data : [];
+    const mapped = raw.map(toSuggestion).filter(Boolean) as Suggestion[];
+
+    // Deduplicate by label
+    const seen = new Set<string>();
+    const items = mapped.filter(s => {
+      const k = s.label;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    // Debug in the browser console so we can see what the API actually returns
+    // (Remove these logs after you confirm it works)
+    // eslint-disable-next-line no-console
+    console.log("[AirportField] /api/places?q=%s -> %o items", term, items.length, { rawCount: raw.length, sample: items.slice(0, 5) });
+
+    if (!res.ok) {
+      return { items, error: `API ${res.status}: ${json?.error || res.statusText || "Unknown error"}` };
+    }
+    return { items };
+  } catch (e: any) {
+    return { items: [], error: e?.message || String(e) };
+  }
 }
 
 export default function AirportField(props: {
   label?: string;
   code?: string;
   initialDisplay?: string;
-  onChangeCode?: (code: string, display: string) => void;
+  onChangeCode?: (code: string | undefined, display: string) => void;
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
@@ -51,6 +80,7 @@ export default function AirportField(props: {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
+  const [apiError, setApiError] = useState<string | undefined>(undefined);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,6 +100,7 @@ export default function AirportField(props: {
 
     if (!text || text.trim().length < 2) {
       setItems([]);
+      setApiError(undefined);
       setOpen(false);
       return;
     }
@@ -77,12 +108,11 @@ export default function AirportField(props: {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       setLoading(true);
+      setApiError(undefined);
       try {
-        const list = await fetchPlaces(text);
-        setItems(list);
-        setOpen(true);
-      } catch {
-        setItems([]);
+        const { items, error } = await fetchPlaces(text.trim());
+        setItems(items);
+        if (error) setApiError(error);
         setOpen(true);
       } finally {
         setLoading(false);
@@ -95,12 +125,10 @@ export default function AirportField(props: {
   }, [text, onTextChange]);
 
   function pick(s: Suggestion) {
-    const display =
-      `${s.code ? `${s.code} — ` : ""}${s.name}` +
-      (s.city || s.country ? ` (${[s.city, s.country].filter(Boolean).join(", ")})` : "");
+    const display = s.label;
     setText(display);
     setOpen(false);
-    onChangeCode?.(s.code, s.label || display);
+    onChangeCode?.(s.code, display);
   }
 
   return (
@@ -109,7 +137,7 @@ export default function AirportField(props: {
         type="text"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onFocus={() => (items.length ? setOpen(true) : undefined)}
+        onFocus={() => (items.length || apiError ? setOpen(true) : undefined)}
         placeholder={placeholder}
         aria-autocomplete="list"
         autoComplete="off"
@@ -121,6 +149,7 @@ export default function AirportField(props: {
           width: "100%",
         }}
       />
+
       {open && (
         <div
           role="listbox"
@@ -134,20 +163,30 @@ export default function AirportField(props: {
             border: "1px solid #e2e8f0",
             borderRadius: 10,
             boxShadow: "0 8px 24px rgba(2,6,23,.08)",
-            maxHeight: 260,
+            maxHeight: 280,
             overflowY: "auto",
           }}
         >
           {loading && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Loading…</div>
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>
           )}
-          {!loading && items.length === 0 && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
+
+          {!loading && apiError && (
+            <div style={{ padding: 10, color: "#b91c1c", fontWeight: 700 }}>
+              API error: {apiError}
+            </div>
           )}
-          {!loading &&
+
+          {!loading && !apiError && items.length === 0 && (
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
+              No matches
+            </div>
+          )}
+
+          {!loading && !apiError &&
             items.map((s) => (
               <button
-                key={`${s.code}-${s.name}-${s.city}-${s.country}`}
+                key={s.label}
                 type="button"
                 onClick={() => pick(s)}
                 role="option"
@@ -159,7 +198,6 @@ export default function AirportField(props: {
                   border: "0",
                   borderBottom: "1px dashed #e2e8f0",
                   cursor: "pointer",
-                  fontWeight: 700,
                   color: "#0f172a",
                 }}
               >
