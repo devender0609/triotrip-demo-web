@@ -7,15 +7,16 @@ type Suggestion = {
   name: string;
   city: string;
   country: string;
-  label: string;  // e.g. "AUS — Austin-Bergstrom International (Austin, US)"
+  label: string;  // e.g. "BOS — Logan International (Boston, US)"
 };
 
+/** Fetch places from our server proxy (app/api/places/route.ts) */
 async function fetchPlaces(term: string): Promise<Suggestion[]> {
-  const r = await fetch(`/api/places?q=${encodeURIComponent(term)}`, {
+  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, {
     cache: "no-store",
   });
-  if (!r.ok) return [];
-  const j = await r.json();
+  if (!res.ok) return [];
+  const j = await res.json();
   const items = Array.isArray(j?.data) ? j.data : [];
 
   return items.map((p: any) => {
@@ -39,8 +40,12 @@ export default function AirportField(props: {
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
-  const { initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } =
-    props;
+  const {
+    initialDisplay,
+    onChangeCode,
+    onTextChange,
+    placeholder = "Type city or airport",
+  } = props;
 
   const [text, setText] = useState(initialDisplay || "");
   const [open, setOpen] = useState(false);
@@ -49,7 +54,7 @@ export default function AirportField(props: {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // close on outside click
+  // Close popover on outside click
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!boxRef.current) return;
@@ -59,7 +64,7 @@ export default function AirportField(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // fetch suggestions with debounce
+  // Debounced search
   useEffect(() => {
     onTextChange?.(text);
 
