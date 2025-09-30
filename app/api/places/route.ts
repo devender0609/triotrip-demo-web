@@ -11,10 +11,7 @@ export async function GET(req: Request) {
 
     const token = process.env.DUFFEL_KEY || process.env.DUFFEL_TOKEN;
     if (!token) {
-      return NextResponse.json(
-        { data: [], error: "Missing DUFFEL_KEY (server env var)" },
-        { status: 500 }
-      );
+      return NextResponse.json({ data: [], error: "Missing DUFFEL_KEY env var" }, { status: 500 });
     }
 
     const r = await fetch(
@@ -29,7 +26,7 @@ export async function GET(req: Request) {
       }
     );
 
-    const text = await r.text(); // return Duffel body raw for easy debugging
+    const text = await r.text();
     return new NextResponse(text || JSON.stringify({ data: [] }), {
       status: r.status,
       headers: { "content-type": "application/json" },
