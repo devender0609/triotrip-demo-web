@@ -1,31 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { searchPlaces } from "@/lib/api";
 
 type Suggestion = {
-  code?: string;   // IATA (may be missing for some city-only results)
+  code?: string;
   name: string;
   city?: string;
   country?: string;
-  label: string;   // what we display
+  label: string;
 };
-
-async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; debug: string }> {
-  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
-  const j = await res.json().catch(() => ({} as any));
-  const items: Suggestion[] = Array.isArray(j?.data) ? j.data : [];
-
-  // eslint-disable-next-line no-console
-  console.log("[AirportField] term=%s res.ok=%s items=%o", term, res.ok, items.slice(0, 5));
-
-  const debug = !res.ok
-    ? `API ${res.status} ${res.statusText || ""} ${j?.error ? "- " + j.error : ""}`.trim()
-    : items.length === 0
-      ? `No results`
-      : "";
-
-  return { items, debug };
-}
 
 export default function AirportField(props: {
   label?: string;
@@ -47,10 +31,11 @@ export default function AirportField(props: {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [debug, setDebug] = useState<string>("");
+
   const boxRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Close popover on outside click
+  // close popover on outside click
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!boxRef.current) return;
@@ -60,7 +45,7 @@ export default function AirportField(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // Debounced search (trigger on 1+ chars)
+  // debounced fetch (>= 1 char)
   useEffect(() => {
     onTextChange?.(text);
 
@@ -75,18 +60,23 @@ export default function AirportField(props: {
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const { items, debug } = await fetchPlaces(text.trim());
-        setItems(items);
-        setDebug(debug);
+        const json = await searchPlaces(text.trim());
+        const list = Array.isArray(json?.data) ? (json.data as Suggestion[]) : [];
+        setItems(list);
+        setDebug(list.length === 0 ? "No results" : "");
+        setOpen(true);
+        // eslint-disable-next-line no-console
+        console.log("[AirportField] got", list.slice(0, 5));
+      } catch (err: any) {
+        setItems([]);
+        setDebug(err?.message || "API error");
         setOpen(true);
       } finally {
         setLoading(false);
       }
     }, 250);
 
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
+    return () => timer.current && clearTimeout(timer.current);
   }, [text, onTextChange]);
 
   function pick(s: Suggestion) {
@@ -132,22 +122,11 @@ export default function AirportField(props: {
             overflowY: "auto",
           }}
         >
-          {loading && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>
-          )}
-
-          {!loading && debug && (
-            <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>
-              {debug}
-            </div>
-          )}
-
+          {loading && <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>}
+          {!loading && debug && <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>{debug}</div>}
           {!loading && !debug && items.length === 0 && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
-              No matches
-            </div>
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
           )}
-
           {!loading && !debug &&
             items.map((s) => (
               <button
@@ -160,7 +139,7 @@ export default function AirportField(props: {
                   textAlign: "left",
                   padding: "10px 12px",
                   background: "transparent",
-                  border: "0",
+                  border: 0,
                   borderBottom: "1px dashed #e2e8f0",
                   cursor: "pointer",
                   color: "#0f172a",
