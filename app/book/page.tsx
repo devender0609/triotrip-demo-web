@@ -1,6 +1,6 @@
 ﻿"use client";
 export const dynamic = "force-dynamic";
-export const revalidate = false; // (or 0)
+export const revalidate = 0; // IMPORTANT: use 0 (dynamic), NOT false
 
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
