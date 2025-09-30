@@ -60,17 +60,20 @@ export default function AirportField(props: {
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const json = await searchPlaces(text.trim());
+        const json = await searchPlaces(text.trim()); // ALWAYS relative /api/places
         const list = Array.isArray(json?.data) ? (json.data as Suggestion[]) : [];
         setItems(list);
         setDebug(list.length === 0 ? "No results" : "");
         setOpen(true);
+        // helpful while debugging
         // eslint-disable-next-line no-console
-        console.log("[AirportField] got", list.slice(0, 5));
+        console.log("[AirportField] suggestions:", list.slice(0, 5));
       } catch (err: any) {
         setItems([]);
         setDebug(err?.message || "API error");
         setOpen(true);
+        // eslint-disable-next-line no-console
+        console.error("[AirportField] fetch failed:", err);
       } finally {
         setLoading(false);
       }
@@ -122,12 +125,26 @@ export default function AirportField(props: {
             overflowY: "auto",
           }}
         >
-          {loading && <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>}
-          {!loading && debug && <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>{debug}</div>}
-          {!loading && !debug && items.length === 0 && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
+          {loading && (
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
+              Searching…
+            </div>
           )}
-          {!loading && !debug &&
+
+          {!loading && debug && (
+            <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>
+              {debug}
+            </div>
+          )}
+
+          {!loading && !debug && items.length === 0 && (
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
+              No matches
+            </div>
+          )}
+
+          {!loading &&
+            !debug &&
             items.map((s) => (
               <button
                 key={s.label}

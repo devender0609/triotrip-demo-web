@@ -13,7 +13,7 @@ export async function searchPlaces(q: string) {
   });
 
   if (!res.ok) {
-    // Try to surface a useful message
+    // surface a useful message
     let message = `API error (${res.status})`;
     try {
       const j = await res.clone().json();
@@ -33,8 +33,7 @@ export async function searchPlaces(q: string) {
 }
 
 /* ----------------------------
-   EXTERNAL: your web server API
-   (kept as-is, using BASE + auth)
+   EXTERNAL: your authed API (kept as-is)
    ---------------------------- */
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
