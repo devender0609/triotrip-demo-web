@@ -11,12 +11,36 @@ type Suggestion = {
 };
 
 function toSuggestion(p: any): Suggestion | null {
-  // Duffel (beta) response commonly has: iata_code, name, city_name, country_name
-  const code = p?.iata_code || "";
-  const name = p?.name || p?.airport_name || p?.city_name || "";
-  const city = p?.city_name || p?.city?.name || p?.municipality || "";
-  const country = p?.country_name || p?.country?.name || p?.country || "";
+  if (!p) return null;
 
+  // Duffel (beta) often: { iata_code, name, city_name, country_name }
+  // Duffel (v2-ish) may nest: { name, iata_code, city: { name }, country: { name } }
+  const code =
+    p.iata_code ||
+    p.code ||
+    (typeof p.id === "string" && p.id.length === 3 ? p.id : "") ||
+    "";
+
+  const name =
+    p.name ||
+    p.airport_name ||
+    p.city_name ||
+    (p.city && (p.city.name || p.city.city_name)) ||
+    "";
+
+  const city =
+    p.city_name ||
+    (p.city && (p.city.name || p.city.city_name)) ||
+    p.municipality ||
+    "";
+
+  const country =
+    p.country_name ||
+    (p.country && (p.country.name || p.country.country_name)) ||
+    p.country ||
+    "";
+
+  // Need at least a displayable name
   if (!name) return null;
 
   const label =
@@ -24,41 +48,47 @@ function toSuggestion(p: any): Suggestion | null {
     name +
     (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
 
-  return { code: code || undefined, name, city: city || undefined, country: country || undefined, label };
+  return {
+    code: code || undefined,
+    name,
+    city: city || undefined,
+    country: country || undefined,
+    label,
+  };
 }
 
-async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; error?: string }> {
-  try {
-    const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
-    const text = await res.text(); // read raw for better diagnostics
-    let json: any = {};
-    try { json = text ? JSON.parse(text) : {}; } catch { /* ignore */ }
+async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; debug: string }> {
+  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
 
-    // Duffel returns { data: [...] }
-    const raw = Array.isArray(json?.data) ? json.data : [];
-    const mapped = raw.map(toSuggestion).filter(Boolean) as Suggestion[];
+  // Read raw first so we can always show something if JSON parsing fails
+  const text = await res.text();
+  let json: any = {};
+  try { json = text ? JSON.parse(text) : {}; } catch { /* ignore parse error */ }
 
-    // Deduplicate by label
-    const seen = new Set<string>();
-    const items = mapped.filter(s => {
-      const k = s.label;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
+  // Duffel shape should have { data: [...] }
+  const raw = Array.isArray(json?.data) ? json.data : [];
 
-    // Debug in the browser console so we can see what the API actually returns
-    // (Remove these logs after you confirm it works)
-    // eslint-disable-next-line no-console
-    console.log("[AirportField] /api/places?q=%s -> %o items", term, items.length, { rawCount: raw.length, sample: items.slice(0, 5) });
+  const mapped = raw.map(toSuggestion).filter(Boolean) as Suggestion[];
 
-    if (!res.ok) {
-      return { items, error: `API ${res.status}: ${json?.error || res.statusText || "Unknown error"}` };
-    }
-    return { items };
-  } catch (e: any) {
-    return { items: [], error: e?.message || String(e) };
-  }
+  // Deduplicate by label
+  const seen = new Set<string>();
+  const items = mapped.filter(s => {
+    const k = s.label;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  // eslint-disable-next-line no-console
+  console.log("[AirportField] term=%s res.ok=%s raw=%o items=%o", term, res.ok, raw.slice(0, 3), items.slice(0, 5));
+
+  const debug = !res.ok
+    ? `API ${res.status} ${res.statusText || ""} ${json?.error ? "- " + json.error : ""}`.trim()
+    : items.length === 0
+      ? `No mappable results (raw=${raw.length})`
+      : "";
+
+  return { items, debug };
 }
 
 export default function AirportField(props: {
@@ -80,7 +110,7 @@ export default function AirportField(props: {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
-  const [apiError, setApiError] = useState<string | undefined>(undefined);
+  const [debug, setDebug] = useState<string>("");
   const boxRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -94,13 +124,13 @@ export default function AirportField(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // Debounced search
+  // Debounced search (trigger on 1+ chars)
   useEffect(() => {
     onTextChange?.(text);
 
-    if (!text || text.trim().length < 2) {
+    if (!text || text.trim().length < 1) {
       setItems([]);
-      setApiError(undefined);
+      setDebug("");
       setOpen(false);
       return;
     }
@@ -108,11 +138,10 @@ export default function AirportField(props: {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       setLoading(true);
-      setApiError(undefined);
       try {
-        const { items, error } = await fetchPlaces(text.trim());
+        const { items, debug } = await fetchPlaces(text.trim());
         setItems(items);
-        if (error) setApiError(error);
+        setDebug(debug);
         setOpen(true);
       } finally {
         setLoading(false);
@@ -137,7 +166,7 @@ export default function AirportField(props: {
         type="text"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onFocus={() => (items.length || apiError ? setOpen(true) : undefined)}
+        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
         placeholder={placeholder}
         aria-autocomplete="list"
         autoComplete="off"
@@ -163,7 +192,7 @@ export default function AirportField(props: {
             border: "1px solid #e2e8f0",
             borderRadius: 10,
             boxShadow: "0 8px 24px rgba(2,6,23,.08)",
-            maxHeight: 280,
+            maxHeight: 300,
             overflowY: "auto",
           }}
         >
@@ -171,19 +200,19 @@ export default function AirportField(props: {
             <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>
           )}
 
-          {!loading && apiError && (
-            <div style={{ padding: 10, color: "#b91c1c", fontWeight: 700 }}>
-              API error: {apiError}
+          {!loading && debug && (
+            <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>
+              {debug}
             </div>
           )}
 
-          {!loading && !apiError && items.length === 0 && (
+          {!loading && !debug && items.length === 0 && (
             <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
               No matches
             </div>
           )}
 
-          {!loading && !apiError &&
+          {!loading && !debug &&
             items.map((s) => (
               <button
                 key={s.label}
