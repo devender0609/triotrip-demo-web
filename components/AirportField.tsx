@@ -31,22 +31,6 @@ async function fetchPlaces(term: string): Promise<Suggestion[]> {
   });
 }
 
-async function getSuggestions(term: string): Promise<Suggestion[]> {
-  // Try your existing local endpoint first if you keep it
-  try {
-    const r = await fetch(`/api/airports?q=${encodeURIComponent(term)}`, {
-      cache: "no-store",
-    });
-    if (r.ok) {
-      const list: Suggestion[] = await r.json();
-      if (Array.isArray(list) && list.length > 0) return list;
-    }
-  } catch { /* ignore */ }
-
-  // Fallback to Duffel proxy
-  return fetchPlaces(term);
-}
-
 export default function AirportField(props: {
   label?: string;
   code?: string;
@@ -89,7 +73,7 @@ export default function AirportField(props: {
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const list = await getSuggestions(text);
+        const list = await fetchPlaces(text);
         setItems(list);
         setOpen(true);
       } catch {
