@@ -19,7 +19,7 @@ export async function GET(req: Request) {
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          "Duffel-Version": process.env.DUFFEL_VERSION || "beta",
+          "Duffel-Version": "beta",          // <- force beta
           Accept: "application/json",
         },
         cache: "no-store",
