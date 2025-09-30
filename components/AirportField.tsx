@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "../lib/api"; // <-- fixed: relative import
+import { searchPlaces } from "../lib/api"; // relative import (no alias)
 
 type Suggestion = {
   code?: string;
@@ -20,12 +20,7 @@ export default function AirportField(props: {
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
-  const {
-    initialDisplay,
-    onChangeCode,
-    onTextChange,
-    placeholder = "Type city or airport",
-  } = props;
+  const { initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } = props;
 
   const [text, setText] = useState(initialDisplay || "");
   const [open, setOpen] = useState(false);
@@ -46,7 +41,7 @@ export default function AirportField(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // debounced fetch (>= 1 char)
+  // debounce fetch (>= 1 char)
   useEffect(() => {
     onTextChange?.(text);
 
@@ -99,13 +94,7 @@ export default function AirportField(props: {
         placeholder={placeholder}
         aria-autocomplete="list"
         autoComplete="off"
-        style={{
-          height: 42,
-          padding: "0 10px",
-          border: "1px solid #e2e8f0",
-          borderRadius: 10,
-          width: "100%",
-        }}
+        style={{ height: 42, padding: "0 10px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%" }}
       />
 
       {open && (
@@ -125,26 +114,12 @@ export default function AirportField(props: {
             overflowY: "auto",
           }}
         >
-          {loading && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
-              Searching…
-            </div>
-          )}
-
-          {!loading && debug && (
-            <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>
-              {debug}
-            </div>
-          )}
-
+          {loading && <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>}
+          {!loading && debug && <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>{debug}</div>}
           {!loading && !debug && items.length === 0 && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>
-              No matches
-            </div>
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
           )}
-
-          {!loading &&
-            !debug &&
+          {!loading && !debug &&
             items.map((s) => (
               <button
                 key={s.label}

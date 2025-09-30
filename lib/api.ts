@@ -1,3 +1,4 @@
+// lib/api.ts
 "use client";
 
 import { getSupa } from "./auth/supabase";
@@ -6,34 +7,28 @@ import { getSupa } from "./auth/supabase";
    INTERNAL: site-local API
    ---------------------------- */
 
-/** City/Airport suggestions — ALWAYS call the relative route */
+/** Autocomplete — ALWAYS call the relative route so it works on any domain */
 export async function searchPlaces(q: string) {
   const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`, {
     cache: "no-store",
   });
-
   if (!res.ok) {
-    // surface a useful message
     let message = `API error (${res.status})`;
     try {
       const j = await res.clone().json();
       if (j?.error) message = j.error;
     } catch {
-      try {
-        const t = await res.clone().text();
-        if (t) message = t;
-      } catch {}
+      try { const t = await res.clone().text(); if (t) message = t; } catch {}
     }
     throw new Error(message);
   }
-
   return res.json() as Promise<{
     data: Array<{ label: string; code?: string; name: string; city?: string; country?: string }>;
   }>;
 }
 
 /* ----------------------------
-   EXTERNAL: your authed API (kept as-is)
+   EXTERNAL: your authed API (unchanged)
    ---------------------------- */
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
@@ -75,10 +70,7 @@ async function authedFetch(path: string, init: RequestInit = {}) {
       const j = await res.clone().json();
       if (j?.error) message = j.error;
     } catch {
-      try {
-        const t = await res.clone().text();
-        if (t) message = t;
-      } catch {}
+      try { const t = await res.clone().text(); if (t) message = t; } catch {}
     }
     throw new Error(message);
   }
@@ -86,7 +78,6 @@ async function authedFetch(path: string, init: RequestInit = {}) {
   return res;
 }
 
-/** Favorites API (unchanged) */
 export async function listFavorites() {
   const r = await authedFetch(`/favorites`, { cache: "no-store" });
   return r.json() as Promise<{ items: any[] }>;

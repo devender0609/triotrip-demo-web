@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-// ---------- CORS helper ----------
+/* ---------- CORS helper ---------- */
 function withCORS(res: Response) {
   res.headers.set("Access-Control-Allow-Origin", "*");
   res.headers.set("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -17,16 +17,15 @@ export async function OPTIONS() {
   return withCORS(new Response(null, { status: 204 }));
 }
 
-// ---------- Types ----------
+/* ---------- Types & mapping ---------- */
 type Suggestion = {
-  code?: string;   // IATA
+  code?: string;     // IATA
   name: string;
   city?: string;
   country?: string;
-  label: string;   // display text
+  label: string;     // display text
 };
 
-// ---------- Mapping ----------
 function toSuggestionFromDuffel(p: any): Suggestion | null {
   if (!p) return null;
 
@@ -56,12 +55,13 @@ function toSuggestionFromDuffel(p: any): Suggestion | null {
   return { code: code || undefined, name, city: city || undefined, country: country || undefined, label };
 }
 
-// ---------- Handler ----------
+/* ---------- Handler ---------- */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") || "").trim();
     const debug = searchParams.get("debug") === "1";
+
     if (!q) return withCORS(NextResponse.json({ data: [] }, { status: 200 }));
 
     const token = process.env.DUFFEL_KEY || process.env.DUFFEL_TOKEN;
@@ -71,8 +71,8 @@ export async function GET(req: Request) {
       );
     }
 
+    // Duffel v2 (use query=, not name=)
     const url = `https://api.duffel.com/places/suggestions?query=${encodeURIComponent(q)}`;
-
     const r = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -84,7 +84,7 @@ export async function GET(req: Request) {
 
     const text = await r.text();
     let json: any = {};
-    try { json = text ? JSON.parse(text) : {}; } catch { /* keep text in debug */ }
+    try { json = text ? JSON.parse(text) : {}; } catch { /* leave as text for debug */ }
 
     const raw = Array.isArray(json?.data) ? json.data : [];
     const seen = new Set<string>();
@@ -93,10 +93,9 @@ export async function GET(req: Request) {
       .filter(Boolean)
       .filter((s: any) => !seen.has(s!.label) && seen.add(s!.label));
 
-    if (!debug) {
-      return withCORS(NextResponse.json({ data }, { status: 200 }));
-    }
+    if (!debug) return withCORS(NextResponse.json({ data }, { status: 200 }));
 
+    // Debug mode helps diagnose upstream issues without exposing secrets
     return withCORS(
       NextResponse.json(
         { data, debug: { duffelStatus: r.status, duffelRaw: text.slice(0, 2000) } },
