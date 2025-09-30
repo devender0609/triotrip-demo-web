@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "@/lib/api";
+import { searchPlaces } from "../lib/api";
 
 type Suggestion = {
   code?: string;
