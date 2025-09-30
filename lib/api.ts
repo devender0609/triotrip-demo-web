@@ -1,4 +1,3 @@
-// web/lib/api.ts
 "use client";
 
 import { getSupa } from "./auth/supabase";

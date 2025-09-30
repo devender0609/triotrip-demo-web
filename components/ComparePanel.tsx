@@ -1,4 +1,3 @@
-// web/components/ComparePanel.tsx
 "use client";
 
 import React, { useMemo } from "react";
