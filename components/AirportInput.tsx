@@ -2,25 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type Airport = { code: string; name: string; city: string; country: string; label: string };
+type Suggestion = {
+  code?: string;
+  name: string;
+  city?: string;
+  country?: string;
+  label: string;
+};
 
-async function fetchPlaces(term: string): Promise<Airport[]> {
-  const r = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
-  if (!r.ok) return [];
-  const j = await r.json();
-  const items = Array.isArray(j?.data) ? j.data : [];
-
-  return items.map((p: any) => {
-    const code = p.iata_code || "";
-    const name = p.name || p.airport_name || p.city_name || "";
-    const city = p.city_name || p.city?.name || p.municipality || "";
-    const country = p.country_name || p.country?.name || p.country || "";
-    const label =
-      (code ? `${code} — ` : "") +
-      name +
-      (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
-    return { code, name, city, country, label } as Airport;
-  });
+async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; debug: string }> {
+  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
+  const j = await res.json().catch(() => ({} as any));
+  const items: Suggestion[] = Array.isArray(j?.data) ? j.data : [];
+  const debug = !res.ok
+    ? `API ${res.status} ${res.statusText || ""} ${j?.error ? "- " + j.error : ""}`.trim()
+    : items.length === 0
+      ? `No results`
+      : "";
+  return { items, debug };
 }
 
 export default function AirportInput({
@@ -33,19 +32,20 @@ export default function AirportInput({
   placeholder?: string;
 }) {
   const [term, setTerm] = useState(value);
-  const [items, setItems] = useState<Airport[]>([]);
+  const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [debug, setDebug] = useState<string>("");
 
-  // keep internal term in sync if parent changes value
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => setTerm(value), [value]);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
 
-    if (!term || term.trim().length < 2) {
+    if (!term || term.trim().length < 1) {
       setItems([]);
+      setDebug("");
       setOpen(false);
       return;
     }
@@ -53,20 +53,16 @@ export default function AirportInput({
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const results = await fetchPlaces(term);
-        setItems(results);
-        setOpen(true);
-      } catch {
-        setItems([]);
+        const { items, debug } = await fetchPlaces(term.trim());
+        setItems(items);
+        setDebug(debug);
         setOpen(true);
       } finally {
         setLoading(false);
       }
     }, 220);
 
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
+    return () => { if (timer.current) clearTimeout(timer.current); };
   }, [term]);
 
   return (
@@ -75,28 +71,24 @@ export default function AirportInput({
         value={term}
         onChange={(e) => setTerm(e.target.value)}
         placeholder={placeholder}
-        onFocus={() => items.length && setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
+        autoComplete="off"
       />
       {open && (
         <div className="ai-pop">
           {loading && <div className="ai-row muted">Searching…</div>}
-          {!loading && items.length === 0 && <div className="ai-row muted">No matches</div>}
-          {!loading &&
-            items.map((a) => (
-              <div
-                key={`${a.code}-${a.label}`}
-                className="ai-row"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onChange(a.label);
-                  setTerm(a.label);
-                  setOpen(false);
-                }}
-              >
-                {a.label}
-              </div>
-            ))}
+          {!loading && debug && <div className="ai-row error">{debug}</div>}
+          {!loading && !debug && items.length === 0 && <div className="ai-row muted">No matches</div>}
+          {!loading && !debug && items.map((a) => (
+            <div
+              key={a.label}
+              className="ai-row"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(a.label); setTerm(a.label); setOpen(false); }}
+            >
+              {a.label}
+            </div>
+          ))}
         </div>
       )}
       <style jsx>{`
@@ -106,6 +98,7 @@ export default function AirportInput({
         .ai-row { padding: 10px 12px; cursor: pointer; }
         .ai-row:hover { background: #f8fafc; }
         .ai-row.muted { color: #64748b; cursor: default; }
+        .ai-row.error { color: #b91c1c; cursor: default; font-weight: 700; }
       `}</style>
     </div>
   );
