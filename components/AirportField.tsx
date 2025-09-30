@@ -10,82 +10,18 @@ type Suggestion = {
   label: string;   // what we display
 };
 
-function toSuggestion(p: any): Suggestion | null {
-  if (!p) return null;
-
-  // Duffel (beta) often: { iata_code, name, city_name, country_name }
-  // Duffel (v2-ish) may nest: { name, iata_code, city: { name }, country: { name } }
-  const code =
-    p.iata_code ||
-    p.code ||
-    (typeof p.id === "string" && p.id.length === 3 ? p.id : "") ||
-    "";
-
-  const name =
-    p.name ||
-    p.airport_name ||
-    p.city_name ||
-    (p.city && (p.city.name || p.city.city_name)) ||
-    "";
-
-  const city =
-    p.city_name ||
-    (p.city && (p.city.name || p.city.city_name)) ||
-    p.municipality ||
-    "";
-
-  const country =
-    p.country_name ||
-    (p.country && (p.country.name || p.country.country_name)) ||
-    p.country ||
-    "";
-
-  // Need at least a displayable name
-  if (!name) return null;
-
-  const label =
-    (code ? `${code} — ` : "") +
-    name +
-    (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
-
-  return {
-    code: code || undefined,
-    name,
-    city: city || undefined,
-    country: country || undefined,
-    label,
-  };
-}
-
 async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; debug: string }> {
   const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
-
-  // Read raw first so we can always show something if JSON parsing fails
-  const text = await res.text();
-  let json: any = {};
-  try { json = text ? JSON.parse(text) : {}; } catch { /* ignore parse error */ }
-
-  // Duffel shape should have { data: [...] }
-  const raw = Array.isArray(json?.data) ? json.data : [];
-
-  const mapped = raw.map(toSuggestion).filter(Boolean) as Suggestion[];
-
-  // Deduplicate by label
-  const seen = new Set<string>();
-  const items = mapped.filter(s => {
-    const k = s.label;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const j = await res.json().catch(() => ({} as any));
+  const items: Suggestion[] = Array.isArray(j?.data) ? j.data : [];
 
   // eslint-disable-next-line no-console
-  console.log("[AirportField] term=%s res.ok=%s raw=%o items=%o", term, res.ok, raw.slice(0, 3), items.slice(0, 5));
+  console.log("[AirportField] term=%s res.ok=%s items=%o", term, res.ok, items.slice(0, 5));
 
   const debug = !res.ok
-    ? `API ${res.status} ${res.statusText || ""} ${json?.error ? "- " + json.error : ""}`.trim()
+    ? `API ${res.status} ${res.statusText || ""} ${j?.error ? "- " + j.error : ""}`.trim()
     : items.length === 0
-      ? `No mappable results (raw=${raw.length})`
+      ? `No results`
       : "";
 
   return { items, debug };
