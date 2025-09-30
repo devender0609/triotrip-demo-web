@@ -1,7 +1,8 @@
+// components/AirportField.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "../lib/api";
+import { searchPlaces } from "../lib/api"; // <-- fixed: relative import
 
 type Suggestion = {
   code?: string;
@@ -65,7 +66,6 @@ export default function AirportField(props: {
         setItems(list);
         setDebug(list.length === 0 ? "No results" : "");
         setOpen(true);
-        // helpful while debugging
         // eslint-disable-next-line no-console
         console.log("[AirportField] suggestions:", list.slice(0, 5));
       } catch (err: any) {
