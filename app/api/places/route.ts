@@ -1,24 +1,19 @@
-// app/api/places/route.ts
 import { NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";  // ensure this never prerenders
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") || "").trim();
-
-    if (q.length < 2) {
-      return NextResponse.json({ data: [] }, { status: 200 });
-    }
+    if (q.length < 2) return NextResponse.json({ data: [] });
 
     const token = process.env.DUFFEL_KEY || process.env.DUFFEL_TOKEN;
     if (!token) {
-      // Explicit message to help debugging in Network tab
       return NextResponse.json(
-        { data: [], error: "Missing DUFFEL_KEY env var" },
-        { status: 500 },
+        { data: [], error: "Missing DUFFEL_KEY (server env var)" },
+        { status: 500 }
       );
     }
 
@@ -31,25 +26,15 @@ export async function GET(req: Request) {
           Accept: "application/json",
         },
         cache: "no-store",
-      },
+      }
     );
 
-    // Return Duffel’s error body too so you can read it in DevTools
-    const text = await r.text();
-    if (!r.ok) {
-      return new NextResponse(text || JSON.stringify({ data: [] }), {
-        status: r.status,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new NextResponse(text, {
-      status: 200,
+    const text = await r.text(); // return Duffel body raw for easy debugging
+    return new NextResponse(text || JSON.stringify({ data: [] }), {
+      status: r.status,
       headers: { "content-type": "application/json" },
     });
-  } catch (err: any) {
-    return NextResponse.json(
-      { data: [], error: String(err?.message || err) },
-      { status: 500 },
-    );
+  } catch (e: any) {
+    return NextResponse.json({ data: [], error: String(e?.message || e) }, { status: 500 });
   }
 }
