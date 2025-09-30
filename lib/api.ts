@@ -2,6 +2,41 @@
 
 import { getSupa } from "./auth/supabase";
 
+/* ----------------------------
+   INTERNAL: site-local API
+   ---------------------------- */
+
+/** City/Airport suggestions — ALWAYS call the relative route */
+export async function searchPlaces(q: string) {
+  const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    // Try to surface a useful message
+    let message = `API error (${res.status})`;
+    try {
+      const j = await res.clone().json();
+      if (j?.error) message = j.error;
+    } catch {
+      try {
+        const t = await res.clone().text();
+        if (t) message = t;
+      } catch {}
+    }
+    throw new Error(message);
+  }
+
+  return res.json() as Promise<{
+    data: Array<{ label: string; code?: string; name: string; city?: string; country?: string }>;
+  }>;
+}
+
+/* ----------------------------
+   EXTERNAL: your web server API
+   (kept as-is, using BASE + auth)
+   ---------------------------- */
+
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
 
 async function getToken(): Promise<string | null> {
@@ -31,13 +66,11 @@ async function authedFetch(path: string, init: RequestInit = {}) {
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
 
   if (res.status === 401) {
-    // Not logged in / token invalid → send to login
     redirectToLogin();
     throw new Error("Please log in to continue.");
   }
 
   if (!res.ok) {
-    // Try to extract a helpful message
     let message = `Request failed (${res.status})`;
     try {
       const j = await res.clone().json();
@@ -54,7 +87,7 @@ async function authedFetch(path: string, init: RequestInit = {}) {
   return res;
 }
 
-/** Favorites API */
+/** Favorites API (unchanged) */
 export async function listFavorites() {
   const r = await authedFetch(`/favorites`, { cache: "no-store" });
   return r.json() as Promise<{ items: any[] }>;
