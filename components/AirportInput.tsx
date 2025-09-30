@@ -1,79 +1,109 @@
 // components/AirportInput.tsx
 "use client";
-import { useEffect, useMemo, useState } from "react";
 
-type Airport = { code: string; label: string };
+import { useEffect, useRef, useState } from "react";
+
+type Airport = { code: string; name: string; city: string; country: string; label: string };
 
 export default function AirportInput({
   value,
   onChange,
-  placeholder,
+  placeholder = "Type city or airport",
 }: {
-  value?: Airport | null;
-  onChange: (a: Airport | null) => void;
-  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
 }) {
-  const [term, setTerm] = useState(value?.label ?? "");
-  const [list, setList] = useState<Airport[]>([]);
+  const [term, setTerm] = useState(value);
+  const [items, setItems] = useState<Airport[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const timer = useRef<any>();
 
-  const dep = useMemo(() => term, [term]);
+  // keep internal term in sync if parent changes value
+  useEffect(() => setTerm(value), [value]);
+
   useEffect(() => {
-    const id = setTimeout(async () => {
-      const t = dep.trim();
-      if (t.length < 2) {
-        setList([]);
-        return;
-      }
+    clearTimeout(timer.current);
+    if (!term || term.trim().length < 2) {
+      setItems([]);
+      setOpen(false);
+      return;
+    }
+    timer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/airports?q=${encodeURIComponent(t)}`);
-        const data = (await r.json()) as Airport[];
-        setList(data);
+        setLoading(true);
+        const r = await fetch(`/api/airports?q=${encodeURIComponent(term)}`, { cache: "no-store" });
+        const list = await r.json();
+        setItems(Array.isArray(list) ? list : []);
+        setOpen(true);
       } catch {
-        setList([]);
+        setItems([]);
+        setOpen(true);
+      } finally {
+        setLoading(false);
       }
-    }, 250);
-    return () => clearTimeout(id);
-  }, [dep]);
+    }, 200);
+    return () => clearTimeout(timer.current);
+  }, [term]);
 
   return (
-    <div className="relative">
+    <div className="ai-wrap">
       <input
-        className="border rounded px-3 py-2 w-full"
-        placeholder={placeholder}
         value={term}
-        onChange={(e) => {
-          setTerm(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 120)}
-        autoComplete="off"
+        onChange={(e) => setTerm(e.target.value)}
+        placeholder={placeholder}
+        onFocus={() => items.length && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
-
-      {open && list.length > 0 && (
-        <ul className="absolute z-10 mt-1 w-full bg-white border rounded shadow">
-          {list.map((a) => (
-            <li
-              key={a.code + a.label}
-              className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
-              onMouseDown={() => {
-                onChange(a);
-                setTerm(a.label);
-                setOpen(false);
-              }}
-            >
-              {a.label}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {open && term.trim().length >= 2 && list.length === 0 && (
-        <div className="absolute z-10 mt-1 w-full bg-white border rounded shadow px-3 py-2 text-sm text-gray-500">
-          No matches
+      {open && (
+        <div className="ai-pop">
+          {loading && <div className="ai-row muted">Searching…</div>}
+          {!loading && items.length === 0 && <div className="ai-row muted">No matches</div>}
+          {!loading &&
+            items.map((a) => (
+              <div
+                key={`${a.code}-${a.label}`}
+                className="ai-row"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(a.label);
+                  setTerm(a.label);
+                  setOpen(false);
+                }}
+              >
+                {a.label}
+              </div>
+            ))}
         </div>
       )}
+      <style jsx>{`
+        .ai-wrap { position: relative; }
+        input {
+          width: 100%;
+          height: 40px;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 0 12px;
+        }
+        .ai-pop {
+          position: absolute;
+          left: 0; right: 0; top: 44px;
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.08);
+          z-index: 20;
+          max-height: 280px;
+          overflow: auto;
+        }
+        .ai-row {
+          padding: 10px 12px;
+          cursor: pointer;
+        }
+        .ai-row:hover { background: #f8fafc; }
+        .ai-row.muted { color: #64748b; cursor: default; }
+      `}</style>
     </div>
   );
 }

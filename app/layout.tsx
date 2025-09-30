@@ -1,33 +1,33 @@
 ﻿// app/layout.tsx
 import "./globals.css";
-import type { ReactNode } from "react";
+import type { Metadata } from "next";
 import Brand from "../components/Brand";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "TripTrio",
-  description: "Top-3 smarter travel picks",
+  description: "Top-3 travel picks – smarter, clearer, bookable.",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
         <header
           style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 40,
-            background: "#ffffff",
-            borderBottom: "1px solid #e5e7eb",
-            padding: "10px 16px",
             display: "flex",
-            justifyContent: "center",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 16px",
+            gap: 12,
           }}
         >
           <Brand />
+          <nav style={{ display: "flex", gap: 12 }}>
+            <a href="/saved" className="btn ghost">Saved</a>
+            <a href="/login" className="btn">Login</a>
+          </nav>
         </header>
-
-        <main style={{ minHeight: "100vh" }}>{children}</main>
+        {children}
       </body>
     </html>
   );
