@@ -10,6 +10,43 @@ type Suggestion = {
   label: string;  // e.g. "AUS — Austin-Bergstrom International (Austin, US)"
 };
 
+async function fetchPlaces(term: string): Promise<Suggestion[]> {
+  const r = await fetch(`/api/places?q=${encodeURIComponent(term)}`, {
+    cache: "no-store",
+  });
+  if (!r.ok) return [];
+  const j = await r.json();
+  const items = Array.isArray(j?.data) ? j.data : [];
+
+  return items.map((p: any) => {
+    const code = p.iata_code || "";
+    const name = p.name || p.airport_name || p.city_name || "";
+    const city = p.city_name || p.city?.name || p.municipality || "";
+    const country = p.country_name || p.country?.name || p.country || "";
+    const label =
+      (code ? `${code} — ` : "") +
+      name +
+      (city || country ? ` (${[city, country].filter(Boolean).join(", ")})` : "");
+    return { code, name, city, country, label };
+  });
+}
+
+async function getSuggestions(term: string): Promise<Suggestion[]> {
+  // Try your existing local endpoint first if you keep it
+  try {
+    const r = await fetch(`/api/airports?q=${encodeURIComponent(term)}`, {
+      cache: "no-store",
+    });
+    if (r.ok) {
+      const list: Suggestion[] = await r.json();
+      if (Array.isArray(list) && list.length > 0) return list;
+    }
+  } catch { /* ignore */ }
+
+  // Fallback to Duffel proxy
+  return fetchPlaces(term);
+}
+
 export default function AirportField(props: {
   label?: string;
   code?: string;
@@ -18,7 +55,7 @@ export default function AirportField(props: {
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
-  const { code, initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } =
+  const { initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } =
     props;
 
   const [text, setText] = useState(initialDisplay || "");
@@ -40,20 +77,20 @@ export default function AirportField(props: {
 
   // fetch suggestions with debounce
   useEffect(() => {
-    if (onTextChange) onTextChange(text);
+    onTextChange?.(text);
 
     if (!text || text.trim().length < 2) {
       setItems([]);
+      setOpen(false);
       return;
     }
 
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        const r = await fetch(`/api/airports?q=${encodeURIComponent(text)}`, { cache: "no-store" });
-        const list: Suggestion[] = await r.json();
-        setItems(Array.isArray(list) ? list : []);
+        const list = await getSuggestions(text);
+        setItems(list);
         setOpen(true);
       } catch {
         setItems([]);
@@ -62,12 +99,19 @@ export default function AirportField(props: {
         setLoading(false);
       }
     }, 250);
+
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
   }, [text, onTextChange]);
 
   function pick(s: Suggestion) {
-    setText(`${s.code} — ${s.name}${s.city ? ` (${s.city}` : ""}${s.country ? `, ${s.country}` : ""}${s.city ? ")" : ""}`);
+    const display =
+      `${s.code ? `${s.code} — ` : ""}${s.name}` +
+      (s.city || s.country ? ` (${[s.city, s.country].filter(Boolean).join(", ")})` : "");
+    setText(display);
     setOpen(false);
-    if (onChangeCode) onChangeCode(s.code, s.label || s.code);
+    onChangeCode?.(s.code, s.label || display);
   }
 
   return (
@@ -80,7 +124,13 @@ export default function AirportField(props: {
         placeholder={placeholder}
         aria-autocomplete="list"
         autoComplete="off"
-        style={{ height: 42, padding: "0 10px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%" }}
+        style={{
+          height: 42,
+          padding: "0 10px",
+          border: "1px solid #e2e8f0",
+          borderRadius: 10,
+          width: "100%",
+        }}
       />
       {open && (
         <div
@@ -99,14 +149,16 @@ export default function AirportField(props: {
             overflowY: "auto",
           }}
         >
-          {loading && <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Loading…</div>}
+          {loading && (
+            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Loading…</div>
+          )}
           {!loading && items.length === 0 && (
             <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
           )}
           {!loading &&
             items.map((s) => (
               <button
-                key={`${s.code}-${s.name}`}
+                key={`${s.code}-${s.name}-${s.city}-${s.country}`}
                 type="button"
                 onClick={() => pick(s)}
                 role="option"
@@ -122,7 +174,7 @@ export default function AirportField(props: {
                   color: "#0f172a",
                 }}
               >
-                {s.label || `${s.code} — ${s.name}`}
+                {s.label}
               </button>
             ))}
         </div>
