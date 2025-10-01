@@ -1,6 +1,5 @@
 "use client";
-export const dynamic = 'force-dynamic';
-
+export const dynamic = "force-dynamic";
 
 import React, { useEffect, useMemo, useState } from "react";
 import ResultCard from "../components/ResultCard";
@@ -41,14 +40,24 @@ type SearchPayload = {
   greener?: boolean;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
+/** Local ISO date (yyyy-mm-dd) */
 const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
   .toISOString()
   .slice(0, 10);
 
+/** Try multiple patterns to extract IATA code from a display string */
 function extractIATA(display: string): string {
-  const m = /\(([A-Z]{3})\)/.exec(display || "");
-  return m ? m[1] : "";
+  const s = String(display || "").toUpperCase().trim();
+
+  // (BOS)
+  let m = /\(([A-Z]{3})\)/.exec(s);
+  if (m) return m[1];
+
+  // BOS — Boston ...  OR  BOS - Boston ...
+  m = /^([A-Z]{3})\b/.exec(s);
+  if (m) return m[1];
+
+  return "";
 }
 
 /* small helpers used in compare + pdf */
@@ -234,10 +243,14 @@ export default function Page() {
         greener,
       };
 
-      const r = await fetch(`${API_BASE}/search`, {
+      // IMPORTANT: same-origin Next API route (no CORS)
+      console.log("[runSearch] POST /api/search", payload);
+      const r = await fetch(`/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        cache: "no-store",
+        credentials: "same-origin",
       });
 
       const j = await r.json();

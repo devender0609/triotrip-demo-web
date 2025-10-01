@@ -10,7 +10,7 @@ export default function AirportInput({
   onChange,
   placeholder = "Type city or airport",
 }: {
-  value: string;                  // parent stores selected code
+  value: string;
   onChange: (code: string) => void;
   placeholder?: string;
 }) {
@@ -20,12 +20,10 @@ export default function AirportInput({
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // keep input term in sync if parent replaces value
   useEffect(() => setTerm(value), [value]);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-
     const q = term.trim();
     if (q.length < 2) {
       setItems([]);
@@ -39,21 +37,19 @@ export default function AirportInput({
         console.log("[AirportInput] searching:", q);
         const res = await searchPlaces(q);
         const list: Airport[] = Array.isArray(res?.data) ? res.data : [];
-        console.log("[AirportInput] results:", { count: list.length, sample: list.slice(0, 5) });
+        console.log("[AirportInput] results:", { count: list.length, sample: list.slice(0, 3) });
         setItems(list);
         setOpen(true);
       } catch (e) {
         console.error("[AirportInput] search failed:", e);
         setItems([]);
-        setOpen(false);
+        setOpen(true);
       } finally {
         setLoading(false);
       }
-    }, 300);
+    }, 250);
 
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
+    return () => timer.current && clearTimeout(timer.current);
   }, [term]);
 
   function pick(s: Airport) {
@@ -73,7 +69,7 @@ export default function AirportInput({
         className="form-control"
         autoComplete="off"
       />
-      {open && (loading || items.length > 0) && (
+      {open && (
         <div
           style={{
             position: "absolute",
@@ -90,6 +86,7 @@ export default function AirportInput({
           }}
         >
           {loading && <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>}
+          {!loading && items.length === 0 && <div style={{ padding: 10, color: "#64748b" }}>No matches</div>}
           {!loading &&
             items.map((s, i) => (
               <div

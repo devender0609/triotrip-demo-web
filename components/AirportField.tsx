@@ -13,13 +13,13 @@ type Suggestion = {
 
 export default function AirportField(props: {
   label?: string;
-  code?: string;                // currently-selected code (optional)
-  initialDisplay?: string;      // text to show (optional)
+  code?: string;
+  initialDisplay?: string;
   onChangeCode?: (code: string, display: string) => void;
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
-  const { label, code, initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } = props;
+  const { label, initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } = props;
 
   const [text, setText] = useState(initialDisplay || "");
   const [open, setOpen] = useState(false);
@@ -27,12 +27,10 @@ export default function AirportField(props: {
   const [items, setItems] = useState<Suggestion[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // keep external display in sync
   useEffect(() => {
     if (initialDisplay != null) setText(initialDisplay);
   }, [initialDisplay]);
 
-  // fetch suggestions (debounced)
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
 
@@ -49,21 +47,19 @@ export default function AirportField(props: {
         console.log("[AirportField] searching:", q);
         const res = await searchPlaces(q);
         const list: Suggestion[] = Array.isArray(res?.data) ? res.data : [];
-        console.log("[AirportField] results:", { count: list.length, sample: list.slice(0, 5) });
+        console.log("[AirportField] results:", { count: list.length, sample: list.slice(0, 3) });
         setItems(list);
         setOpen(true);
       } catch (e) {
         console.error("[AirportField] search failed:", e);
         setItems([]);
-        setOpen(false);
+        setOpen(true); // open to show the “No matches” row
       } finally {
         setLoading(false);
       }
-    }, 300);
+    }, 250);
 
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
+    return () => timer.current && clearTimeout(timer.current);
   }, [text]);
 
   function pick(s: Suggestion) {
@@ -74,33 +70,18 @@ export default function AirportField(props: {
     onTextChange?.(display);
   }
 
-  function onInputChange(v: string) {
-    setText(v);
-    onTextChange?.(v);
-  }
-
-  useEffect(() => {
-    const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".airport-field")) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
   return (
     <div className="airport-field" style={{ position: "relative" }}>
       {label ? <label style={{ display: "block", marginBottom: 6 }}>{label}</label> : null}
-
       <input
         value={text}
-        onChange={(e) => onInputChange(e.target.value)}
+        onChange={(e) => { setText(e.target.value); onTextChange?.(e.target.value); }}
         onFocus={() => text.trim().length >= 2 && setOpen(true)}
         placeholder={placeholder}
         className="form-control"
         autoComplete="off"
       />
-
-      {open && (loading || items.length > 0) && (
+      {open && (
         <div
           style={{
             position: "absolute",
@@ -117,6 +98,9 @@ export default function AirportField(props: {
           }}
         >
           {loading && <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>}
+          {!loading && items.length === 0 && (
+            <div style={{ padding: 10, color: "#64748b" }}>No matches</div>
+          )}
           {!loading &&
             items.map((s, i) => (
               <button
