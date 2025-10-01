@@ -1,38 +1,33 @@
 "use client";
 
 /**
- * In production: always same-origin (/api/**) to avoid CORS.
- * In dev: if NEXT_PUBLIC_API_BASE is set to http://localhost:4000 we use it.
+ * In production, always call same-origin /api/* to avoid CORS.
+ * In local dev, if you set NEXT_PUBLIC_API_BASE (e.g., http://localhost:4000),
+ * we'll use it. In production we ignore it.
  */
 
 const isBrowser = typeof window !== "undefined";
 const isDev = process.env.NODE_ENV !== "production";
+const PUBLIC_BASE = isDev ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
 
-// Only allow NEXT_PUBLIC_API_BASE in dev builds.
-// In production, force same-origin.
-const PUBLIC_BASE =
-  isDev ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
-
-/** Build a URL to our API. In production this is always relative (/api/...). */
+/** Normalize to /api/<path>; return absolute only in dev if PUBLIC_BASE set */
 function apiUrl(path: string) {
-  // normalize
   const p = path.startsWith("/") ? path : `/${path}`;
-  // If caller passes already “/api/...”, keep it; else prefix.
   const withApi = p.startsWith("/api/") ? p : `/api${p}`;
-  // If browser + prod => same-origin; if dev and PUBLIC_BASE present => absolute.
-  return isBrowser ? `${PUBLIC_BASE}${withApi}` : withApi;
+  return isBrowser && PUBLIC_BASE ? `${PUBLIC_BASE.replace(/\/+$/, "")}${withApi}` : withApi;
 }
 
-/** Generic helper */
-export async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
+/** Generic JSON fetch (same-origin in prod) */
+async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const url = apiUrl(path);
   const res = await fetch(url, {
     ...init,
-    // avoid stale suggestions during typing
-    cache: "no-store",
+    cache: init?.cache ?? "no-store",
     credentials: "same-origin",
   });
+
   if (!res.ok) {
+    // Try to surface a useful error
     let msg = `Request failed (${res.status})`;
     try {
       const j = await res.clone().json();
@@ -46,8 +41,40 @@ export async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Public helper used by Airport fields */
+/** =========================
+ *  Places (autocomplete)
+ *  ========================= */
 export async function searchPlaces(term: string) {
-  // NOTE: we call /api/places on the **same origin**
-  return getJSON<{ ok: boolean; data: any[] }>(`/api/places?q=${encodeURIComponent(term)}`);
+  const q = (term || "").trim();
+  if (q.length < 2) return { ok: true, data: [] as any[] };
+  // Always hit our own API route; dev base is auto-applied by apiUrl
+  return fetchJSON<{ ok: boolean; data: any[] }>(`/api/places?q=${encodeURIComponent(q)}`);
 }
+
+/** =========================
+ *  Favorites API (used by app/saved and ResultCard)
+ *  ========================= */
+
+/** GET /api/favorites -> { items: any[] } */
+export async function listFavorites() {
+  return fetchJSON<{ items: any[] }>(`/api/favorites`);
+}
+
+/** POST /api/favorites { payload } -> { item: any } */
+export async function addFavorite(payload: any) {
+  return fetchJSON<{ item: any }>(`/api/favorites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload }),
+  });
+}
+
+/** DELETE /api/favorites/:id -> { ok: boolean } */
+export async function removeFavorite(id: string) {
+  return fetchJSON<{ ok: boolean }>(`/api/favorites/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/** (Optional utility if you need it elsewhere) */
+export const getJSON = fetchJSON;
