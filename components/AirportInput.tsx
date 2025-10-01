@@ -1,62 +1,66 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { searchPlaces } from "../lib/api";
 
-type Airport = { code: string; name: string; city: string; country?: string; label: string };
+type Airport = { code?: string; name: string; city?: string; country?: string; label: string };
 
 export default function AirportInput({
   value,
   onChange,
   placeholder = "Type city or airport",
 }: {
-  value: string;
-  onChange: (v: string) => void;
+  value: string;                  // parent stores selected code
+  onChange: (code: string) => void;
   placeholder?: string;
 }) {
   const [term, setTerm] = useState(value);
   const [items, setItems] = useState<Airport[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const timer = useRef<any>();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // keep internal term in sync if parent changes value
+  // keep input term in sync if parent replaces value
   useEffect(() => setTerm(value), [value]);
 
   useEffect(() => {
-    clearTimeout(timer.current);
-    if (!term || term.trim().length < 2) {
+    if (timer.current) clearTimeout(timer.current);
+
+    const q = term.trim();
+    if (q.length < 2) {
       setItems([]);
       setOpen(false);
       return;
     }
+
     timer.current = setTimeout(async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        const url = `/api/places?q=${encodeURIComponent(term)}`;
-        console.log("[AirportInput] requesting", url);
-        const r = await fetch(url, { cache: "no-store", credentials: "same-origin" });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const payload = await r.json();
-        const list: Airport[] = Array.isArray(payload?.data) ? payload.data : payload;
-        setItems(Array.isArray(list) ? list : []);
-        console.log("[AirportInput] got", list.length, "items");
+        console.log("[AirportInput] searching:", q);
+        const res = await searchPlaces(q);
+        const list: Airport[] = Array.isArray(res?.data) ? res.data : [];
+        console.log("[AirportInput] results:", { count: list.length, sample: list.slice(0, 5) });
+        setItems(list);
         setOpen(true);
       } catch (e) {
-        console.error("[AirportInput] fetch failed", e);
+        console.error("[AirportInput] search failed:", e);
         setItems([]);
         setOpen(false);
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, 300);
 
-    return () => clearTimeout(timer.current);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
   }, [term]);
 
   function pick(s: Airport) {
-    setTerm(s.label || `${s.code} — ${s.name}`);
+    const display = s.label || (s.code ? `${s.code} — ${s.name}` : s.name);
+    setTerm(display);
     setOpen(false);
-    onChange(s.code);
+    if (s.code) onChange(s.code);
   }
 
   return (
@@ -67,6 +71,7 @@ export default function AirportInput({
         onFocus={() => term.trim().length >= 2 && setOpen(true)}
         placeholder={placeholder}
         className="form-control"
+        autoComplete="off"
       />
       {open && (loading || items.length > 0) && (
         <div
@@ -75,8 +80,8 @@ export default function AirportInput({
             top: "100%",
             left: 0,
             right: 0,
-            zIndex: 20,
-            maxHeight: 280,
+            zIndex: 30,
+            maxHeight: 300,
             overflow: "auto",
             background: "#fff",
             border: "1px solid #e2e8f0",
@@ -86,17 +91,13 @@ export default function AirportInput({
         >
           {loading && <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>}
           {!loading &&
-            items.map((s) => (
+            items.map((s, i) => (
               <div
-                key={`${s.code}-${s.name}`}
-                className="ai-row"
+                key={`${s.code || "nocode"}-${s.name}-${i}`}
                 onClick={() => pick(s)}
-                style={{ padding: "10px 12px", cursor: "pointer" }}
+                style={{ padding: "10px 12px", cursor: "pointer", borderBottom: "1px dashed #e2e8f0" }}
               >
-                <strong>{s.code}</strong> — {s.name}{" "}
-                <span style={{ color: "#64748b" }}>
-                  {s.city ? `(${s.city})` : ""}
-                </span>
+                <strong>{s.label || (s.code ? `${s.code} — ${s.name}` : s.name)}</strong>
               </div>
             ))}
         </div>
