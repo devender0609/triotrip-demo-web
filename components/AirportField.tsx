@@ -1,202 +1,283 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { searchPlaces } from "@/lib/api";
+import React from "react";
 
-type Place = {
-  code?: string;
-  name: string;
-  city?: string;
-  country?: string;
-  label: string;
+type Item = {
+  type: "CITY" | "AIRPORT" | string;
+  iataCode?: string;
+  name?: string;         // full airport or city display name
+  cityName?: string;     // city display name (if AIRPORT, the city it's in)
+  countryName?: string;
+  cityCode?: string;     // used as placeId for hotels (PAR, LON, NYC, etc.)
 };
 
-export default function AirportField(props: {
-  id?: string;
+export default function AirportField({
+  label,
+  code,
+  initialDisplay,
+  onChangeCode,  // (code, display, placeId?)
+  onTextChange,
+  /** Dev-only base; in production we always use same-origin */
+  apiBase = process.env.NEXT_PUBLIC_API_BASE || "",
+}: {
   label: string;
-  placeholder?: string;
-  /** legacy props used by app/page.tsx */
   code?: string;
   initialDisplay?: string;
+  onChangeCode?: (code: string, display: string, placeId?: string) => void;
   onTextChange?: (display: string) => void;
-  onChangeCode?: (code: string, display: string) => void;
-  autoFocus?: boolean;
+  apiBase?: string;
 }) {
-  const {
-    id,
-    label,
-    placeholder = "Type city or airport",
-    code,
-    initialDisplay = "",
-    onTextChange,
-    onChangeCode,
-    autoFocus,
-  } = props;
+  const [text, setText] = React.useState<string>(initialDisplay || code || "");
+  const [open, setOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [items, setItems] = React.useState<Item[]>([]);
+  const [active, setActive] = React.useState(0);
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const debounceRef = React.useRef<any>();
 
-  const [term, setTerm] = useState(initialDisplay);
-  const [items, setItems] = useState<Place[]>([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [active, setActive] = useState(-1);
-  const [everLoaded, setEverLoaded] = useState(false);
+  React.useEffect(() => {
+    setText(initialDisplay || code || "");
+  }, [initialDisplay, code]);
 
-  const boxRef = useRef<HTMLDivElement>(null);
-  const ctrlRef = useRef<AbortController | null>(null);
-  const reqId = useRef(0);
-  const cache = useMemo(() => new Map<string, Place[]>(), []);
-
-  useEffect(() => setTerm(initialDisplay), [initialDisplay]);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!boxRef.current) return;
-      if (!boxRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setActive(-1);
-      }
+  // close on outside click
+  React.useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  // debounced search
-  useEffect(() => {
-    const q = term.trim();
-    setActive(-1);
+  function sanitize(s: any): string {
+    const t = s == null ? "" : String(s).trim();
+    if (!t) return "";
+    const low = t.toLowerCase();
+    return low === "undefined" || low === "null" ? "" : t;
+  }
 
-    if (q.length < 2) {
+  /** Map our /api/places "data" rows to the Item shape used by this UI */
+  function coerceFromPlacesData(arr: any[]): Item[] {
+    return arr.map((r: any): Item => {
+      const iataCode = sanitize(r.code || r.iata || r.iataCode);
+      const name = sanitize(r.name);
+      const cityName = sanitize(r.city);
+      const countryName = sanitize(r.country);
+      // Some APIs return "cityCode" for metro areas (PAR/LON/NYC) — preserve if present
+      const cityCode = sanitize(r.cityCode || r.placeId);
+      // Heuristic type
+      const type: Item["type"] =
+        iataCode && name && cityName ? "AIRPORT" : "CITY";
+      return { type, iataCode, name, cityName, countryName, cityCode };
+    });
+  }
+
+  function formatDisplay(it: Item): string {
+    const main = sanitize(it.cityName) || sanitize(it.name) || sanitize(it.iataCode) || "Unknown";
+    const code = sanitize(it.iataCode);
+    const country = sanitize(it.countryName);
+    const mid = code ? ` (${code})` : "";
+    const tail = country ? `, ${country}` : "";
+    return `${main}${mid}${tail}`;
+  }
+
+  /** Build URL: dev may use http://localhost:4000; prod always same-origin */
+  function buildPlacesUrl(q: string) {
+    const path = `/api/places?q=${encodeURIComponent(q)}`;
+    const devBaseAllowed = process.env.NODE_ENV !== "production" && !!apiBase;
+    return devBaseAllowed ? `${apiBase.replace(/\/+$/,"")}${path}` : path;
+  }
+
+  function fetchItems(q: string) {
+    const qq = sanitize(q);
+    if (qq.length < 1) {
       setItems([]);
-      setLoading(false);
       return;
     }
-    if (cache.has(q)) {
-      setItems(cache.get(q)!);
-      setOpen(true);
-      setLoading(false);
-      setEverLoaded(true);
-      return;
-    }
+    setLoading(true);
 
-    const timer = setTimeout(async () => {
-      ctrlRef.current?.abort();
-      const ac = new AbortController();
-      ctrlRef.current = ac;
+    const url = buildPlacesUrl(qq);
+    console.log("[AirportField] /api/places ->", url);
 
-      setLoading(true);
-      const my = ++reqId.current;
+    fetch(url, { cache: "no-store", credentials: "same-origin" })
+      .then(async (r) => {
+        const text = await r.text();
+        let j: any = {};
+        try { j = text ? JSON.parse(text) : {}; } catch {}
+        // Expected shape: { ok: true, data: [...] }
+        const data = Array.isArray(j?.data) ? j.data : [];
+        const next = coerceFromPlacesData(data);
+        setItems(next);
+        setActive(0);
+        setOpen(true);
+      })
+      .catch((err) => {
+        console.warn("[AirportField] places fetch failed:", err?.message || String(err));
+        setItems([]);
+        setOpen(true);
+      })
+      .finally(() => setLoading(false));
+  }
 
-      try {
-        console.log("[AirportField] searching:", q);
-        const json = await searchPlaces(q); // always same-origin
-        const list: Place[] = Array.isArray(json?.data) ? json.data : [];
-        cache.set(q, list);
-        if (my === reqId.current) {
-          console.log("[AirportField] results:", { count: list.length, sample: list.slice(0, 5) });
-          setItems(list);
-          setOpen(true);
-          setEverLoaded(true);
-        }
-      } catch (e: any) {
-        if (e?.name !== "AbortError") {
-          console.warn("[AirportField] search failed:", e?.message || String(e));
-          if (my === reqId.current) {
-            setItems([]);
-            setOpen(true);
-            setEverLoaded(true);
-          }
-        }
-      } finally {
-        if (my === reqId.current) setLoading(false);
-      }
-    }, 250);
+  function onInputChange(v: string) {
+    setText(v);
+    onTextChange?.(v);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchItems(v), 220);
+  }
 
-    return () => clearTimeout(timer);
-  }, [term, cache]);
+  function onSelect(it: Item) {
+    const display = formatDisplay(it);
+    const code = sanitize(it.iataCode) || ""; // always safe string
+    // Prefer cityCode for hotel searches if present (e.g., PAR), otherwise undefined
+    const placeId = sanitize(it.cityCode) || undefined;
 
-  function choose(it: Place) {
-    const display = it.label || (it.code ? `${it.code} — ${it.name}` : it.name);
-    setTerm(display);
+    setText(display);
     onTextChange?.(display);
-    if (it.code) onChangeCode?.(it.code, display);
+    onChangeCode?.(code, display, placeId);
     setOpen(false);
-    setActive(-1);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
-      setOpen(true);
-      return;
-    }
-    if (!open) return;
-
+    if (!open || items.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => Math.min(i + 1, items.length - 1));
+      setActive((a) => Math.min(items.length - 1, a + 1));
+      scrollActive(1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
+      setActive((a) => Math.max(0, a - 1));
+      scrollActive(-1);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (active >= 0 && items[active]) choose(items[active]);
+      onSelect(items[active]);
     } else if (e.key === "Escape") {
       setOpen(false);
-      setActive(-1);
     }
   }
 
-  const showNo = everLoaded && !loading && term.trim().length >= 2 && items.length === 0;
+  function scrollActive(dir: number) {
+    const el = listRef.current?.querySelector<HTMLDivElement>(`[data-idx="${active + dir}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }
+
+  const hasValue = Boolean(sanitize(code) || sanitize(text));
 
   return (
-    <div ref={boxRef} className="relative w-full">
-      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-      </label>
-
-      <input
-        id={id}
-        value={term}
-        onChange={(e) => {
-          const v = e.target.value;
-          setTerm(v);
-          onTextChange?.(v);
-        }}
-        onFocus={() => term.trim().length >= 2 && setOpen(true)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm
-                   focus:border-blue-500 focus:ring-blue-500"
-        autoComplete="off"
-        autoFocus={props.autoFocus}
-      />
+    <div className="af" ref={boxRef}>
+      <label className="af-label">{label}</label>
+      <div className={`af-inputwrap ${open ? "open" : ""}`}>
+        <input
+          className="af-input"
+          placeholder="Type city or airport"
+          value={text}
+          onChange={(e) => onInputChange(e.target.value)}
+          onFocus={() => text && setOpen(true)}
+          onKeyDown={onKeyDown}
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls="af-listbox"
+        />
+        {hasValue && (
+          <button
+            type="button"
+            className="af-clear"
+            aria-label="Clear"
+            onClick={() => {
+              setText("");
+              onTextChange?.("");
+              onChangeCode?.("", "", undefined);
+              setItems([]);
+              setOpen(false);
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {open && (
-        <div className="absolute left-0 right-0 mt-1 max-h-80 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg z-50">
-          {loading && <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>}
-
-          {!loading && items.length > 0 && (
-            <ul className="py-1">
-              {items.slice(0, 12).map((it, idx) => (
-                <li
-                  key={`${it.code ?? it.label}-${idx}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => choose(it)}
-                  className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${active === idx ? "bg-blue-50" : ""}`}
-                >
-                  <div className="font-medium">
-                    {it.code ? `${it.code} — ` : ""}
-                    {it.name}
-                  </div>
-                  {(it.city || it.country) && (
-                    <div className="text-gray-600">{[it.city, it.country].filter(Boolean).join(", ")}</div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {showNo && <div className="px-3 py-2 text-sm text-gray-500">No matches</div>}
+        <div className="af-pop" role="listbox" id="af-listbox" ref={listRef}>
+          {loading && <div className="af-row muted">Searching…</div>}
+          {!loading && items.length === 0 && <div className="af-row muted">No matches</div>}
+          {!loading &&
+            items.map((it, i) => (
+              <div
+                key={`${sanitize(it.iataCode) || it.name || i}-${i}`}
+                data-idx={i}
+                role="option"
+                aria-selected={i === active}
+                className={`af-row ${i === active ? "active" : ""}`}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onSelect(it)}
+              >
+                <div className="af-row-main">
+                  <span className="iata">{sanitize(it.iataCode) || "—"}</span>
+                  <span className="city">
+                    {highlight(text, sanitize(it.cityName) || sanitize(it.name) || "Unknown")}
+                  </span>
+                </div>
+                <div className="af-row-sub">
+                  {(it.type === "CITY" || it.type === "city") ? "City" : "Airport"}
+                  {sanitize(it.name) ? ` • ${it.name}` : ""}
+                  {sanitize(it.countryName) ? ` • ${it.countryName}` : ""}
+                </div>
+              </div>
+            ))}
         </div>
       )}
+
+      <style jsx>{`
+        .af { position: relative; min-width: 260px; }
+        .af-label { display:block; font-weight:800; margin-bottom:6px; color:#0f172a; }
+        .af-inputwrap { position: relative; }
+        .af-input {
+          width:100%; height:44px; border-radius:12px; padding:0 38px 0 12px;
+          border:1px solid #e2e8f0; outline:none; background:#fff; color:#0f172a;
+        }
+        .af-input:focus { border-color:#38bdf8; box-shadow:0 0 0 3px rgba(56,189,248,.25); }
+        .af-clear {
+          position:absolute; right:6px; top:6px; width:32px; height:32px; border-radius:999px;
+          border:none; background:#f1f5f9; color:#64748b; font-size:18px; cursor:pointer;
+        }
+        .af-clear:hover { background:#e2e8f0; }
+
+        .af-pop {
+          position:absolute; z-index:60; top:calc(100% + 6px); left:0; right:0;
+          background:#fff; color:#0f172a; border:1px solid #e2e8f0; border-radius:12px;
+          box-shadow:0 10px 24px rgba(15,23,42,.12); max-height:320px; overflow:auto;
+        }
+        .af-row { padding:10px 12px; cursor:pointer; display:grid; gap:2px; }
+        .af-row:hover, .af-row.active { background:#f0f9ff; }
+        .af-row-main { display:flex; gap:8px; align-items:baseline; font-weight:900; }
+        .af-row-sub { font-size:12px; color:#475569; }
+        .muted { color:#64748b; font-style:italic; }
+        .iata {
+          color:#0369a1; background:#e0f2fe; padding:2px 6px; border-radius:8px;
+          font-size:12px; letter-spacing:.4px;
+        }
+        .city :global(mark) {
+          background: linear-gradient(90deg,#fff7ed,#ffedd5);
+          border-radius:3px; padding:0 2px;
+        }
+      `}</style>
     </div>
+  );
+}
+
+/** Highlight helper (case-insensitive) */
+function highlight(q: string, text: string) {
+  if (!q) return <>{text}</>;
+  const qi = q.toLowerCase();
+  const ti = text.toLowerCase();
+  const idx = ti.indexOf(qi);
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark>{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
   );
 }
