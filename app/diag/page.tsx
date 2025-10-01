@@ -21,7 +21,7 @@ export default function Diag() {
           raw: text.slice(0, 400),
         });
       } catch (e: any) {
-        setState({ error: String(e?.message || e) });
+        setState({ error: String(e?.message || e), name: e?.name ?? null });
       }
     })();
   }, []);

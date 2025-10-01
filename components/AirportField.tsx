@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "../lib/api";
 
 type Suggestion = {
-  code?: string;
+  code: string;
   name: string;
-  city?: string;
+  city: string;
   country?: string;
   label: string;
 };
@@ -15,136 +14,135 @@ export default function AirportField(props: {
   label?: string;
   code?: string;
   initialDisplay?: string;
-  onChangeCode?: (code: string | undefined, display: string) => void;
+  onChangeCode?: (code: string, display: string) => void;
   onTextChange?: (display: string) => void;
   placeholder?: string;
 }) {
-  const { initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } = props;
+  const { code, initialDisplay, onChangeCode, onTextChange, placeholder = "Type city or airport" } =
+    props;
 
   const [text, setText] = useState(initialDisplay || "");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
-  const [debug, setDebug] = useState<string>("");
+  const timer = useRef<any>();
 
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // close popover on outside click
+  // keep external -> internal in sync
   useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (!boxRef.current) return;
-      if (!boxRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+    if (initialDisplay != null) setText(initialDisplay);
+  }, [initialDisplay]);
 
-  // debounced fetch (>= 1 char)
+  // load suggestions
   useEffect(() => {
-    onTextChange?.(text);
+    if (timer.current) clearTimeout(timer.current);
 
-    if (!text || text.trim().length < 1) {
+    if (!text || text.trim().length < 2) {
       setItems([]);
-      setDebug("");
       setOpen(false);
       return;
     }
 
-    if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      setLoading(true);
       try {
-        const q = text.trim();
-        // dev aid: log the origin we’re hitting
-        // eslint-disable-next-line no-console
-        console.log("[AirportField] searching", {
-          origin: typeof window !== "undefined" ? window.location.origin : "(ssr)",
-          q,
-        });
-
-        const json = await searchPlaces(q);
-        const list = Array.isArray(json?.data) ? (json.data as Suggestion[]) : [];
-        setItems(list);
-        setDebug(list.length === 0 ? "No results" : "");
+        setLoading(true);
+        const url = `/api/places?q=${encodeURIComponent(text)}`;
+        // Debug so you can see it in the browser console
+        console.log("[AirportField] requesting", url);
+        const r = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const payload = await r.json();
+        const list: Suggestion[] = Array.isArray(payload?.data) ? payload.data : payload;
+        setItems(Array.isArray(list) ? list : []);
+        console.log("[AirportField] got", list.length, "items");
         setOpen(true);
-        // eslint-disable-next-line no-console
-        console.log("[AirportField] results", { count: list.length, sample: list.slice(0, 5) });
-      } catch (err: any) {
+      } catch (e) {
+        console.error("[AirportField] fetch failed:", e);
         setItems([]);
-        setDebug(err?.message || "Network error");
-        setOpen(true);
-        // eslint-disable-next-line no-console
-        console.error("[AirportField] fetch failed:", err);
+        setOpen(false);
       } finally {
         setLoading(false);
       }
     }, 250);
 
-    return () => timer.current && clearTimeout(timer.current);
-  }, [text, onTextChange]);
+    return () => clearTimeout(timer.current);
+  }, [text]);
 
   function pick(s: Suggestion) {
-    const display = s.label;
+    const display = s.label || `${s.code} — ${s.name}`;
     setText(display);
     setOpen(false);
     onChangeCode?.(s.code, display);
+    onTextChange?.(display);
   }
 
+  function onInputChange(v: string) {
+    setText(v);
+    onTextChange?.(v);
+  }
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".airport-field")) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
   return (
-    <div ref={boxRef} style={{ position: "relative" }}>
+    <div className="airport-field" style={{ position: "relative" }}>
+      {props.label ? (
+        <label className="form-label" style={{ display: "block", marginBottom: 6 }}>
+          {props.label}
+        </label>
+      ) : null}
+
       <input
-        type="text"
         value={text}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
+        onChange={(e) => onInputChange(e.target.value)}
+        onFocus={() => text.trim().length >= 2 && setOpen(true)}
         placeholder={placeholder}
-        aria-autocomplete="list"
-        autoComplete="off"
-        style={{ height: 42, padding: "0 10px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%" }}
+        className="form-control"
       />
 
-      {open && (
+      {open && (loading || items.length > 0) && (
         <div
-          role="listbox"
+          className="dropdown"
           style={{
             position: "absolute",
-            zIndex: 20,
+            top: "100%",
             left: 0,
             right: 0,
-            top: 44,
+            zIndex: 50,
             background: "#fff",
             border: "1px solid #e2e8f0",
-            borderRadius: 10,
-            boxShadow: "0 8px 24px rgba(2,6,23,.08)",
-            maxHeight: 300,
-            overflowY: "auto",
+            borderRadius: 6,
+            marginTop: 4,
+            maxHeight: 320,
+            overflow: "auto",
           }}
         >
-          {loading && <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>Searching…</div>}
-          {!loading && debug && <div style={{ padding: 10, color: "#b45309", fontWeight: 700 }}>{debug}</div>}
-          {!loading && !debug && items.length === 0 && (
-            <div style={{ padding: 10, color: "#64748b", fontWeight: 700 }}>No matches</div>
+          {loading && (
+            <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>
           )}
-          {!loading && !debug &&
+          {!loading &&
             items.map((s) => (
               <button
-                key={s.label}
+                key={`${s.code}-${s.name}`}
                 type="button"
                 onClick={() => pick(s)}
-                role="option"
+                className="dropdown-item"
                 style={{
+                  display: "block",
                   width: "100%",
                   textAlign: "left",
                   padding: "10px 12px",
-                  background: "transparent",
-                  border: 0,
                   borderBottom: "1px dashed #e2e8f0",
                   cursor: "pointer",
+                  fontWeight: 700,
                   color: "#0f172a",
                 }}
               >
-                {s.label}
+                {s.label || `${s.code} — ${s.name}`}
               </button>
             ))}
         </div>

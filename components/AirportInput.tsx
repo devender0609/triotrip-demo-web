@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "../lib/api";
 
-type Suggestion = { code?: string; name: string; city?: string; country?: string; label: string };
+type Airport = { code: string; name: string; city: string; country?: string; label: string };
 
 export default function AirportInput({
   value,
@@ -15,79 +14,91 @@ export default function AirportInput({
   placeholder?: string;
 }) {
   const [term, setTerm] = useState(value);
-  const [items, setItems] = useState<Suggestion[]>([]);
+  const [items, setItems] = useState<Airport[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [debug, setDebug] = useState<string>("");
+  const timer = useRef<any>();
 
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // keep internal term in sync if parent changes value
   useEffect(() => setTerm(value), [value]);
 
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-
-    if (!term || term.trim().length < 1) {
+    clearTimeout(timer.current);
+    if (!term || term.trim().length < 2) {
       setItems([]);
-      setDebug("");
       setOpen(false);
       return;
     }
-
     timer.current = setTimeout(async () => {
-      setLoading(true);
       try {
-        const q = term.trim();
-        // eslint-disable-next-line no-console
-        console.log("[AirportInput] searching", {
-          origin: typeof window !== "undefined" ? window.location.origin : "(ssr)",
-          q,
-        });
-
-        const json = await searchPlaces(q);
-        const list = Array.isArray(json?.data) ? json.data : [];
-        setItems(list);
-        setDebug(list.length === 0 ? "No results" : "");
+        setLoading(true);
+        const url = `/api/places?q=${encodeURIComponent(term)}`;
+        console.log("[AirportInput] requesting", url);
+        const r = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const payload = await r.json();
+        const list: Airport[] = Array.isArray(payload?.data) ? payload.data : payload;
+        setItems(Array.isArray(list) ? list : []);
+        console.log("[AirportInput] got", list.length, "items");
         setOpen(true);
-        // eslint-disable-next-line no-console
-        console.log("[AirportInput] results", { count: list.length, sample: list.slice(0, 5) });
-      } catch (err: any) {
+      } catch (e) {
+        console.error("[AirportInput] fetch failed", e);
         setItems([]);
-        setDebug(err?.message || "Network error");
-        setOpen(true);
-        // eslint-disable-next-line no-console
-        console.error("[AirportInput] fetch failed:", err);
+        setOpen(false);
       } finally {
         setLoading(false);
       }
-    }, 220);
+    }, 250);
 
-    return () => { if (timer.current) clearTimeout(timer.current); };
+    return () => clearTimeout(timer.current);
   }, [term]);
+
+  function pick(s: Airport) {
+    setTerm(s.label || `${s.code} — ${s.name}`);
+    setOpen(false);
+    onChange(s.code);
+  }
 
   return (
     <div style={{ position: "relative" }}>
       <input
         value={term}
         onChange={(e) => setTerm(e.target.value)}
+        onFocus={() => term.trim().length >= 2 && setOpen(true)}
         placeholder={placeholder}
-        autoComplete="off"
-        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
+        className="form-control"
       />
-      {open && (
-        <div style={{ position: "absolute", left: 0, right: 0, top: 44, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, zIndex: 20, maxHeight: 280, overflow: "auto" }}>
+      {open && (loading || items.length > 0) && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: 20,
+            maxHeight: 280,
+            overflow: "auto",
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 6,
+            marginTop: 4,
+          }}
+        >
           {loading && <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>}
-          {!loading && debug && <div style={{ padding: 10, color: "#b91c1c", fontWeight: 700 }}>{debug}</div>}
-          {!loading && !debug && items.length === 0 && <div style={{ padding: 10, color: "#64748b" }}>No matches</div>}
-          {!loading && !debug && items.map((a) => (
-            <div
-              key={a.label}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onChange(a.label); setTerm(a.label); setOpen(false); }}
-              style={{ padding: "10px 12px", cursor: "pointer", borderBottom: "1px dashed #e2e8f0" }}
-            >
-              {a.label}
-            </div>
-          ))}
+          {!loading &&
+            items.map((s) => (
+              <div
+                key={`${s.code}-${s.name}`}
+                className="ai-row"
+                onClick={() => pick(s)}
+                style={{ padding: "10px 12px", cursor: "pointer" }}
+              >
+                <strong>{s.code}</strong> — {s.name}{" "}
+                <span style={{ color: "#64748b" }}>
+                  {s.city ? `(${s.city})` : ""}
+                </span>
+              </div>
+            ))}
         </div>
       )}
     </div>

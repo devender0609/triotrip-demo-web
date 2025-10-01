@@ -3,40 +3,49 @@
 import { getSupa } from "./auth/supabase";
 
 /* =========================================================================
-   SAME-ORIGIN PUBLIC API (browser)  — used by the airport autocomplete
+   SAME-ORIGIN PUBLIC API (browser) — used by airport autocomplete
    ======================================================================== */
 
-/** Build a same-origin URL safely in the browser. */
+/** Safely build a same-origin URL in the browser. */
 function sameOriginUrl(path: string) {
   try {
     if (typeof window !== "undefined" && window.location?.origin) {
       return new URL(path, window.location.origin).toString();
     }
   } catch {}
-  return path; // SSR or unknown env
+  return path; // SSR/unknown env fallback (keeps path relative)
 }
 
 /**
  * GET /api/places?q=...
- * - Always calls your own domain (same-origin)
- * - Adds debug logs so you can see the exact request + outcome in DevTools
+ * - Always calls your own domain (same origin)
+ * - Verbose logs to surface the real cause of “NetworkError…”
+ * - Small timeout so a hanging extension won’t stall forever
  */
 export async function searchPlaces(q: string) {
   const url = sameOriginUrl(`/api/places?q=${encodeURIComponent(q)}`);
 
-  // Debug: visible in the browser console
+  // Debug: visible in browser console
   // eslint-disable-next-line no-console
   console.log("[searchPlaces] requesting", url);
 
   let res: Response;
   try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 8000); // 8s safety timeout
+
     res = await fetch(url, {
       cache: "no-store",
       credentials: "same-origin",
-    });
+      signal: ctl.signal,
+    }).finally(() => clearTimeout(to));
   } catch (e: any) {
     // eslint-disable-next-line no-console
-    console.error("[searchPlaces] fetch threw", e?.message || e);
+    console.error("[searchPlaces] fetch threw:", {
+      name: e?.name,
+      message: e?.message || String(e),
+      cause: e?.cause ?? null,
+    });
     throw e;
   }
 
@@ -59,14 +68,14 @@ export async function searchPlaces(q: string) {
     throw new Error(message);
   }
 
+  // Expecting { data: [...] }
   return res.json() as Promise<{
     data: Array<{ label: string; code?: string; name: string; city?: string; country?: string }>;
   }>;
 }
 
 /* =========================================================================
-   AUTHED BACKEND API (server you control) — favorites, etc.
-   Keep as-is; unrelated to /api/places.
+   AUTHED BACKEND API (your external server) — favorites, etc.
    ======================================================================== */
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
@@ -95,7 +104,14 @@ async function authedFetch(path: string, init: RequestInit = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers });
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.error("[authedFetch] network error:", e?.message || e);
+    throw e;
+  }
 
   if (res.status === 401) {
     redirectToLogin();
