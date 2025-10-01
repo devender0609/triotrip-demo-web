@@ -12,120 +12,94 @@ type Place = {
   label: string;
 };
 
-// very small local seed — only used as a fallback
-const seed: Place[] = [
+const LOCAL_SEED: Place[] = [
   { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US", label: "BOS – Logan International Airport – Boston – US" },
-  { code: "AUS", name: "Austin–Bergstrom International", city: "Austin", country: "US", label: "AUS – Austin–Bergstrom International – Austin – US" },
+  { code: "AUS", name: "Austin-Bergstrom International Airport", city: "Austin", country: "US", label: "AUS – Austin-Bergstrom – Austin – US" },
   { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US", label: "MIA – Miami International Airport – Miami – US" },
 ];
 
-function ok(data: Place[], extra: Record<string, unknown> = {}) {
-  return NextResponse.json({ ok: true, source: extra.source ?? "duffel", data, meta: extra.meta }, { status: 200 });
-}
-
-function cors() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, Duffel-Version",
-      "Access-Control-Max-Age": "86400",
-    },
-  });
-}
-
-export async function OPTIONS() {
-  return cors();
-}
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const q = (searchParams.get("q") || searchParams.get("name") || "").trim();
-
-  if (!q) {
-    return ok([], { source: "empty" });
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const q = (searchParams.get("q") || "").trim();
+  if (q.length < 2) {
+    return NextResponse.json({ ok: true, source: "empty", data: [] });
   }
 
-  const DUFFEL_KEY = process.env.DUFFEL_KEY || process.env.DUFFEL_API_KEY || "";
-  const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v1";
+  const duffelKey = process.env.DUFFEL_KEY || process.env.DUFFEL_API_KEY || "";
+  const duffelVersion = process.env.DUFFEL_VERSION || "v1";
 
-  // If no key, return filtered seed immediately
-  if (!DUFFEL_KEY) {
-    const filtered = seed.filter((p) =>
-      [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
-    );
-    return ok(filtered.slice(0, 12), { source: "local-seed", meta: { hasDuffelKey: false } });
-  }
+  // Helper to normalize Duffel response to Place[]
+  const mapDuffel = (j: any): Place[] =>
+    Array.isArray(j?.data)
+      ? j.data.map((p: any) => {
+          const code = p.iata_code || p.iata_city_code || "";
+          const name = p.name || p.city_name || p.subdivision_name || p.country_name || "";
+          const city = p.city_name || undefined;
+          const country = p.country_code || p.country_name || undefined;
+          const label = `${code} – ${name}${city ? ` – ${city}` : ""}${country ? ` – ${country}` : ""}`;
+          return { code, name, city, country, label };
+        }).filter((x: Place) => x.code && x.name)
+      : [];
 
+  // Try Duffel suggestions first
+  let duffelTried = false;
   try {
-    // Build query with repeated keys using URLSearchParams.append
-    const params = new URLSearchParams();
-    params.set("name", q);
-    params.set("limit", "12");
-    params.append("types[]", "airport");
-    params.append("types[]", "city");
+    if (duffelKey) {
+      duffelTried = true;
+      const params = new URLSearchParams();
+      params.set("name", q);
+      params.set("limit", "12");
+      params.append("types[]", "airport");
+      params.append("types[]", "city");
 
-    const url = `https://api.duffel.com/places/suggestions?${params.toString()}`;
-
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${DUFFEL_KEY}`,
-        "Duffel-Version": DUFFEL_VERSION, // <-- ensure this is 'v1' in Vercel
-        Accept: "application/json",
-      },
-      // don't cache suggestions in edge/network
-      cache: "no-store",
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      // fall back to local seed on error
-      const filtered = seed.filter((p) =>
-        [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
-      );
-      return ok(filtered.slice(0, 12), {
-        source: "local-seed",
-        meta: {
-          hasDuffelKey: true,
-          duffelTried: true,
-          duffelStatus: res.status,
-          duffelError: text || res.statusText,
+      const res = await fetch(`https://api.duffel.com/places/suggestions?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${duffelKey}`,
+          "Duffel-Version": duffelVersion,
+          Accept: "application/json",
         },
+        // absolutely no caching here
+        cache: "no-store",
       });
+
+      // If Duffel returns OK, map and return
+      if (res.ok) {
+        const j = await res.json();
+        const items = mapDuffel(j);
+        if (items.length > 0) {
+          return NextResponse.json({ ok: true, source: "duffel", data: items });
+        }
+      } else {
+        // Surface version/permission issues to help debugging in /api/places
+        const errBody = await res.text().catch(() => "");
+        return NextResponse.json(
+          {
+            ok: true,
+            source: "duffel-error",
+            status: res.status,
+            error: errBody,
+            data: [],
+          },
+          { status: 200 },
+        );
+      }
     }
-
-    const json = (await res.json()) as {
-      data?: Array<{
-        name?: string;
-        iata_code?: string;
-        city_name?: string;
-        country_code?: string;
-      }>;
-    };
-
-    const data: Place[] =
-      (json.data || []).map((it) => ({
-        code: it.iata_code || "",
-        name: it.name || "",
-        city: it.city_name || "",
-        country: it.country_code || "",
-        label: `${it.iata_code ?? ""} – ${it.name ?? ""}${it.city_name ? " – " + it.city_name : ""}${it.country_code ? " – " + it.country_code : ""}`,
-      })).filter((p) => p.code && p.name) // keep only valid entries
-       .slice(0, 12);
-
-    return ok(data, {
-      source: "duffel",
-      meta: { hasDuffelKey: true, duffelTried: true, duffelCount: data.length },
-    });
-  } catch (err: any) {
-    // network/JSON failover to seed
-    const filtered = seed.filter((p) =>
-      [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
-    );
-    return ok(filtered.slice(0, 12), {
-      source: "local-seed",
-      meta: { hasDuffelKey: !!process.env.DUFFEL_KEY, duffelTried: true, error: String(err?.message || err) },
-    });
+  } catch (e: any) {
+    // swallow network errors and fall through to seed
   }
+
+  // Fallback – simple local seed so the UI isn’t empty
+  const qLower = q.toLowerCase();
+  const seeded = LOCAL_SEED.filter(
+    (p) =>
+      p.code.toLowerCase().includes(qLower) ||
+      p.name.toLowerCase().includes(qLower) ||
+      (p.city?.toLowerCase() || "").includes(qLower),
+  );
+
+  return NextResponse.json({
+    ok: true,
+    source: duffelTried ? "local-seed (duffel empty)" : "local-seed",
+    data: seeded,
+  });
 }
