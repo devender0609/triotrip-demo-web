@@ -4,150 +4,128 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// ---------- helpers ----------
-type Place = { code: string; name: string; city: string; country?: string };
-type Out = { ok: boolean; source: string; data: Array<Place & { label: string }>; meta?: any };
+type Place = {
+  code: string;
+  name: string;
+  city?: string;
+  country?: string;
+  label: string;
+};
 
-const DUFFEL_KEY = process.env.DUFFEL_KEY ?? "";
-const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v1"; // ← IMPORTANT: use "v1"
-
-// Nice, small fallback so the UI never looks “dead”
-const LOCAL_SEED: Place[] = [
-  { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US" },
-  { code: "AUS", name: "Austin–Bergstrom International Airport", city: "Austin", country: "US" },
-  { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US" },
-  { code: "JFK", name: "John F. Kennedy International Airport", city: "New York", country: "US" },
-  { code: "SFO", name: "San Francisco International Airport", city: "San Francisco", country: "US" },
-  { code: "LHR", name: "Heathrow Airport", city: "London", country: "GB" }
+// very small local seed — only used as a fallback
+const seed: Place[] = [
+  { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US", label: "BOS – Logan International Airport – Boston – US" },
+  { code: "AUS", name: "Austin–Bergstrom International", city: "Austin", country: "US", label: "AUS – Austin–Bergstrom International – Austin – US" },
+  { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US", label: "MIA – Miami International Airport – Miami – US" },
 ];
 
-function toLabel(p: Place) {
-  return `${p.code} — ${p.name} — ${p.city}${p.country ? ` — ${p.country}` : ""}`;
+function ok(data: Place[], extra: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: true, source: extra.source ?? "duffel", data, meta: extra.meta }, { status: 200 });
 }
 
-function filterLocalSeed(term: string) {
-  const t = term.toLowerCase();
-  return LOCAL_SEED.filter(
-    (p) =>
-      p.code.toLowerCase().includes(t) ||
-      p.city.toLowerCase().includes(t) ||
-      p.name.toLowerCase().includes(t)
-  )
-    .slice(0, 12)
-    .map((p) => ({ ...p, label: toLabel(p) }));
+function cors() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Duffel-Version",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
 }
 
-// ---------- GET /api/places?q=bos ----------
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const qRaw = searchParams.get("q") || "";
-  const q = qRaw.trim();
+export async function OPTIONS() {
+  return cors();
+}
 
-  const meta: any = {
-    hasDuffelKey: Boolean(DUFFEL_KEY),
-    duffelTried: false,
-    duffelStatus: undefined as number | undefined,
-    duffelCount: 0,
-    teleportTried: false,
-    teleportCount: 0
-  };
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const q = (searchParams.get("q") || searchParams.get("name") || "").trim();
 
-  // very short queries → cheap local seed
-  if (q.length < 2) {
-    return NextResponse.json<Out>({
-      ok: true,
-      source: "empty",
-      data: []
+  if (!q) {
+    return ok([], { source: "empty" });
+  }
+
+  const DUFFEL_KEY = process.env.DUFFEL_KEY || process.env.DUFFEL_API_KEY || "";
+  const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v1";
+
+  // If no key, return filtered seed immediately
+  if (!DUFFEL_KEY) {
+    const filtered = seed.filter((p) =>
+      [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
+    );
+    return ok(filtered.slice(0, 12), { source: "local-seed", meta: { hasDuffelKey: false } });
+  }
+
+  try {
+    // Build query with repeated keys using URLSearchParams.append
+    const params = new URLSearchParams();
+    params.set("name", q);
+    params.set("limit", "12");
+    params.append("types[]", "airport");
+    params.append("types[]", "city");
+
+    const url = `https://api.duffel.com/places/suggestions?${params.toString()}`;
+
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${DUFFEL_KEY}`,
+        "Duffel-Version": DUFFEL_VERSION, // <-- ensure this is 'v1' in Vercel
+        Accept: "application/json",
+      },
+      // don't cache suggestions in edge/network
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      // fall back to local seed on error
+      const filtered = seed.filter((p) =>
+        [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
+      );
+      return ok(filtered.slice(0, 12), {
+        source: "local-seed",
+        meta: {
+          hasDuffelKey: true,
+          duffelTried: true,
+          duffelStatus: res.status,
+          duffelError: text || res.statusText,
+        },
+      });
+    }
+
+    const json = (await res.json()) as {
+      data?: Array<{
+        name?: string;
+        iata_code?: string;
+        city_name?: string;
+        country_code?: string;
+      }>;
+    };
+
+    const data: Place[] =
+      (json.data || []).map((it) => ({
+        code: it.iata_code || "",
+        name: it.name || "",
+        city: it.city_name || "",
+        country: it.country_code || "",
+        label: `${it.iata_code ?? ""} – ${it.name ?? ""}${it.city_name ? " – " + it.city_name : ""}${it.country_code ? " – " + it.country_code : ""}`,
+      })).filter((p) => p.code && p.name) // keep only valid entries
+       .slice(0, 12);
+
+    return ok(data, {
+      source: "duffel",
+      meta: { hasDuffelKey: true, duffelTried: true, duffelCount: data.length },
+    });
+  } catch (err: any) {
+    // network/JSON failover to seed
+    const filtered = seed.filter((p) =>
+      [p.code, p.name, p.city].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase())
+    );
+    return ok(filtered.slice(0, 12), {
+      source: "local-seed",
+      meta: { hasDuffelKey: !!process.env.DUFFEL_KEY, duffelTried: true, error: String(err?.message || err) },
     });
   }
-
-  // 1) Duffel (primary)
-  if (DUFFEL_KEY) {
-    meta.duffelTried = true;
-    try {
-      const url =
-        "https://api.duffel.com/places/suggestions?" +
-        new URLSearchParams({
-          name: q,
-          limit: "12",
-          "types[]": "airport",
-          "types[]": "city"
-        }).toString();
-
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${DUFFEL_KEY}`,
-          Accept: "application/json",
-          "Duffel-Version": DUFFEL_VERSION // ← must be "v1"
-        },
-        // ensure edge compatibility
-        cache: "no-store"
-      });
-
-      meta.duffelStatus = res.status;
-
-      if (res.ok) {
-        const json: any = await res.json();
-        const items = (json?.data || []).map((d: any) => {
-          const code = d?.iata_code || d?.iata_city_code || d?.id || "";
-          const name = d?.name || d?.municipality_name || d?.type || "";
-          const city = d?.city?.name || d?.city_name || d?.iata_city_code || "";
-          const country = d?.city?.country_code || d?.country_code || "";
-          const p: Place = { code, name, city, country };
-          return { ...p, label: toLabel(p) };
-        }).filter((x: any) => x.code && x.name);
-
-        meta.duffelCount = items.length;
-
-        if (items.length > 0) {
-          return NextResponse.json<Out>({
-            ok: true,
-            source: "duffel",
-            data: items,
-            meta
-          });
-        }
-      } else {
-        // keep the error string for debugging in /api/places
-        meta.duffelError = await res.text().catch(() => "");
-      }
-    } catch (e: any) {
-      meta.duffelError = String(e?.message || e);
-    }
-  }
-
-  // 2) Teleport (secondary; coarse grain city list)
-  try {
-    meta.teleportTried = true;
-    const resp = await fetch(
-      "https://api.teleport.org/api/cities/?limit=10&search=" + encodeURIComponent(q),
-      { cache: "no-store" }
-    );
-    if (resp.ok) {
-      const j: any = await resp.json();
-      const items = (j?._embedded?.["city:search-results"] || []).map((r: any) => {
-        const match = r?.matching_full_name || "";
-        // Try to synthesize a code from airport-like bits if present, otherwise use city name
-        const city = match.split(",")[0] || match;
-        const p: Place = { code: city.slice(0, 3).toUpperCase(), name: city, city };
-        return { ...p, label: toLabel(p) };
-      });
-      meta.teleportCount = items.length;
-
-      if (items.length > 0) {
-        return NextResponse.json<Out>({ ok: true, source: "teleport", data: items, meta });
-      }
-    }
-  } catch {
-    // ignore teleport errors
-  }
-
-  // 3) Local seed fallback so UI is never empty
-  const seeded = filterLocalSeed(q);
-  return NextResponse.json<Out>({
-    ok: true,
-    source: "local-seed",
-    data: seeded,
-    meta
-  });
 }
