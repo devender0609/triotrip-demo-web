@@ -6,11 +6,24 @@ import { getSupa } from "./auth/supabase";
    INTERNAL: site-local API
    ---------------------------- */
 
-/** Autocomplete — ALWAYS call the relative route (same origin) */
+/** Build a same-origin URL safely in the browser */
+function sameOriginUrl(path: string) {
+  try {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return new URL(path, window.location.origin).toString();
+    }
+  } catch {}
+  return path; // fall back (SSR or unknown env) – still relative
+}
+
+/** Autocomplete — ALWAYS same-origin */
 export async function searchPlaces(q: string) {
-  const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`, {
+  const url = sameOriginUrl(`/api/places?q=${encodeURIComponent(q)}`);
+  const res = await fetch(url, {
     cache: "no-store",
+    credentials: "same-origin",
   });
+
   if (!res.ok) {
     let message = `API error (${res.status})`;
     try {
@@ -21,6 +34,7 @@ export async function searchPlaces(q: string) {
     }
     throw new Error(message);
   }
+
   return res.json() as Promise<{
     data: Array<{ label: string; code?: string; name: string; city?: string; country?: string }>;
   }>;

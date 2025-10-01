@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchPlaces } from "../lib/api"; // relative import
+import { searchPlaces } from "../lib/api";
 
 type Suggestion = { code?: string; name: string; city?: string; country?: string; label: string };
 
@@ -36,16 +36,23 @@ export default function AirportInput({
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const json = await searchPlaces(term.trim());      // RELATIVE /api/places
+        const q = term.trim();
+        // eslint-disable-next-line no-console
+        console.log("[AirportInput] searching", {
+          origin: typeof window !== "undefined" ? window.location.origin : "(ssr)",
+          q,
+        });
+
+        const json = await searchPlaces(q);
         const list = Array.isArray(json?.data) ? json.data : [];
         setItems(list);
         setDebug(list.length === 0 ? "No results" : "");
         setOpen(true);
         // eslint-disable-next-line no-console
-        console.log("[AirportInput] /api/places ->", { term, count: list.length, sample: list.slice(0, 5) });
+        console.log("[AirportInput] results", { count: list.length, sample: list.slice(0, 5) });
       } catch (err: any) {
         setItems([]);
-        setDebug(err?.message || "API error");
+        setDebug(err?.message || "Network error");
         setOpen(true);
         // eslint-disable-next-line no-console
         console.error("[AirportInput] fetch failed:", err);
