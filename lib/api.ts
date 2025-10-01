@@ -2,27 +2,46 @@
 
 import { getSupa } from "./auth/supabase";
 
-/* ----------------------------
-   INTERNAL: site-local API
-   ---------------------------- */
+/* =========================================================================
+   SAME-ORIGIN PUBLIC API (browser)  — used by the airport autocomplete
+   ======================================================================== */
 
-/** Build a same-origin URL safely in the browser */
+/** Build a same-origin URL safely in the browser. */
 function sameOriginUrl(path: string) {
   try {
     if (typeof window !== "undefined" && window.location?.origin) {
       return new URL(path, window.location.origin).toString();
     }
   } catch {}
-  return path; // fall back (SSR or unknown env) – still relative
+  return path; // SSR or unknown env
 }
 
-/** Autocomplete — ALWAYS same-origin */
+/**
+ * GET /api/places?q=...
+ * - Always calls your own domain (same-origin)
+ * - Adds debug logs so you can see the exact request + outcome in DevTools
+ */
 export async function searchPlaces(q: string) {
   const url = sameOriginUrl(`/api/places?q=${encodeURIComponent(q)}`);
-  const res = await fetch(url, {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
+
+  // Debug: visible in the browser console
+  // eslint-disable-next-line no-console
+  console.log("[searchPlaces] requesting", url);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.error("[searchPlaces] fetch threw", e?.message || e);
+    throw e;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log("[searchPlaces] response", res.status, res.ok);
 
   if (!res.ok) {
     let message = `API error (${res.status})`;
@@ -30,8 +49,13 @@ export async function searchPlaces(q: string) {
       const j = await res.clone().json();
       if (j?.error) message = j.error;
     } catch {
-      try { const t = await res.clone().text(); if (t) message = t; } catch {}
+      try {
+        const t = await res.clone().text();
+        if (t) message = t;
+      } catch {}
     }
+    // eslint-disable-next-line no-console
+    console.error("[searchPlaces] non-OK", message);
     throw new Error(message);
   }
 
@@ -40,9 +64,10 @@ export async function searchPlaces(q: string) {
   }>;
 }
 
-/* ----------------------------
-   EXTERNAL: your authed API (unchanged)
-   ---------------------------- */
+/* =========================================================================
+   AUTHED BACKEND API (server you control) — favorites, etc.
+   Keep as-is; unrelated to /api/places.
+   ======================================================================== */
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
 
@@ -83,7 +108,10 @@ async function authedFetch(path: string, init: RequestInit = {}) {
       const j = await res.clone().json();
       if (j?.error) message = j.error;
     } catch {
-      try { const t = await res.clone().text(); if (t) message = t; } catch {}
+      try {
+        const t = await res.clone().text();
+        if (t) message = t;
+      } catch {}
     }
     throw new Error(message);
   }
@@ -91,6 +119,7 @@ async function authedFetch(path: string, init: RequestInit = {}) {
   return res;
 }
 
+/** Favorites API */
 export async function listFavorites() {
   const r = await authedFetch(`/favorites`, { cache: "no-store" });
   return r.json() as Promise<{ items: any[] }>;
