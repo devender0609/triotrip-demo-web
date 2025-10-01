@@ -6,10 +6,10 @@ type Place = { code: string; name: string; city?: string; country?: string; labe
 
 export default function AirportField(props: {
   label: string;
-  code: string;                         // controlled IATA code (BOS)
-  initialDisplay: string;               // starting display text (eg "BOS — ...")
-  onTextChange: (v: string) => void;    // update the display text in parent
-  onChangeCode: (code: string, display: string) => void; // commit selection
+  code: string;
+  initialDisplay: string;
+  onTextChange: (v: string) => void;
+  onChangeCode: (code: string, display: string) => void;
   autoFocus?: boolean;
 }) {
   const { label, code, initialDisplay, onTextChange, onChangeCode, autoFocus } = props;
@@ -20,17 +20,9 @@ export default function AirportField(props: {
   const [loading, setLoading] = useState(false);
   const lastIssued = useRef(0);
 
-  // keep parent display text in sync when initialDisplay changes externally
-  useEffect(() => {
-    setTerm(initialDisplay || code || "");
-  }, [initialDisplay, code]);
+  useEffect(() => setTerm(initialDisplay || code || ""), [initialDisplay, code]);
+  useEffect(() => onTextChange?.(term), [term, onTextChange]);
 
-  // Notify parent on each keystroke so its state reflects what user sees
-  useEffect(() => {
-    onTextChange?.(term);
-  }, [term, onTextChange]);
-
-  // Debounced search to our own API
   useEffect(() => {
     const t = term.trim();
     if (t.length < 2) {
@@ -38,24 +30,19 @@ export default function AirportField(props: {
       setOpen(false);
       return;
     }
-
     setLoading(true);
     const id = ++lastIssued.current;
     const handle = setTimeout(async () => {
       try {
         const url = `/api/places?q=${encodeURIComponent(t)}`;
-        console.log("[AirportField] /api/places -> %s", url);
-
         const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const j = await res.json();
+        const j = await res.json().catch(() => ({}));
         const items: Place[] = Array.isArray(j?.data) ? j.data : [];
         if (id === lastIssued.current) {
           setOptions(items);
           setOpen(true);
-          console.log("[AirportField] results:", { count: items.length, sample: items.slice(0, 1) });
         }
-      } catch (e) {
+      } catch {
         if (id === lastIssued.current) {
           setOptions([]);
           setOpen(true);
@@ -64,11 +51,8 @@ export default function AirportField(props: {
         if (id === lastIssued.current) setLoading(false);
       }
     }, 200);
-
     return () => clearTimeout(handle);
   }, [term]);
-
-  const hasOptions = options.length > 0;
 
   const onPick = (p: Place) => {
     onChangeCode?.(p.code, p.label);
@@ -79,9 +63,9 @@ export default function AirportField(props: {
   const placeholder = useMemo(() => (label ? label : "Type city or airport"), [label]);
 
   return (
-    <div className="relative">
+    <div className="relative w-full">
       <input
-        className="form-control"
+        className="w-full h-11 px-4 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-[15px]"
         placeholder={placeholder}
         value={term}
         onChange={(e) => setTerm(e.target.value)}
@@ -92,19 +76,17 @@ export default function AirportField(props: {
 
       {open && (
         <div
-          className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded border bg-white shadow"
+          className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg"
           onMouseDown={(e) => e.preventDefault()}
         >
-          {loading && (
-            <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
-          )}
+          {loading && <div className="px-4 py-3 text-sm text-gray-500">Searching…</div>}
 
-          {!loading && hasOptions && (
-            <ul className="divide-y">
+          {!loading && options.length > 0 && (
+            <ul className="divide-y divide-gray-100">
               {options.map((p) => (
                 <li
                   key={`${p.code}-${p.label}`}
-                  className="px-3 py-2 cursor-pointer hover:bg-gray-50"
+                  className="px-4 py-3 cursor-pointer hover:bg-gray-50"
                   onClick={() => onPick(p)}
                 >
                   <div className="font-medium">{p.label}</div>
@@ -113,8 +95,8 @@ export default function AirportField(props: {
             </ul>
           )}
 
-          {!loading && !hasOptions && (
-            <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+          {!loading && options.length === 0 && (
+            <div className="px-4 py-3 text-sm text-gray-500">No matches</div>
           )}
         </div>
       )}
