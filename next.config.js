@@ -1,8 +1,7 @@
-/** @type {import('next').NextConfig} */
+﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
   async headers() {
     return [
-      // Allow client fetches to your own API (and Duffel/Teleport if you ever call them client-side)
       {
         source: "/:path*",
         headers: [
@@ -24,7 +23,6 @@ const nextConfig = {
           }
         ]
       },
-      // (Optional) extra CORS headers for API routes; your route already sets them
       {
         source: "/api/:path*",
         headers: [
@@ -36,8 +34,7 @@ const nextConfig = {
       }
     ];
   },
-
-  // IMPORTANT: do NOT add any rewrites for /api/:path*
+  // IMPORTANT: do not add rewrites that touch /api/:path*
 };
 
 module.exports = nextConfig;
