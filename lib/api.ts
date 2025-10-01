@@ -1,74 +1,53 @@
 "use client";
 
-import { getSupa } from "./auth/supabase";
-
 /**
- * SAME-ORIGIN helper (no base URL). Adds Supabase token when available.
+ * In production: always same-origin (/api/**) to avoid CORS.
+ * In dev: if NEXT_PUBLIC_API_BASE is set to http://localhost:4000 we use it.
  */
-async function authedFetch(path: string, init: RequestInit = {}) {
-  // add Authorization if we have a Supabase session
-  let headers: HeadersInit = init.headers || {};
-  try {
-    const supa = getSupa();
-    if (supa) {
-      const { data } = await supa.auth.getSession();
-      const token = data?.session?.access_token;
-      if (token) headers = { ...headers, Authorization: `Bearer ${token}` };
-    }
-  } catch {
-    /* ignore */
-  }
 
-  const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
+const isBrowser = typeof window !== "undefined";
+const isDev = process.env.NODE_ENV !== "production";
 
-  if (res.status === 401) {
-    if (typeof window !== "undefined") {
-      const next = window.location.pathname + window.location.search;
-      window.location.href = `/login?next=${encodeURIComponent(next)}`;
-    }
-    throw new Error("Please log in to continue.");
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(body || `Request failed (${res.status})`);
-  }
-  return res;
+// Only allow NEXT_PUBLIC_API_BASE in dev builds.
+// In production, force same-origin.
+const PUBLIC_BASE =
+  isDev ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
+
+/** Build a URL to our API. In production this is always relative (/api/...). */
+function apiUrl(path: string) {
+  // normalize
+  const p = path.startsWith("/") ? path : `/${path}`;
+  // If caller passes already “/api/...”, keep it; else prefix.
+  const withApi = p.startsWith("/api/") ? p : `/api${p}`;
+  // If browser + prod => same-origin; if dev and PUBLIC_BASE present => absolute.
+  return isBrowser ? `${PUBLIC_BASE}${withApi}` : withApi;
 }
 
-/** Airport/City suggestions used by the inputs */
-export async function searchPlaces(term: string, signal?: AbortSignal) {
-  const q = (term || "").trim();
-  if (q.length < 2) return [];
-  const url = `/api/places?q=${encodeURIComponent(q)}`;
-  console.log("[searchPlaces] requesting", url);
-  const res = await fetch(url, { signal, cache: "no-store", credentials: "same-origin" });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.warn("[searchPlaces] non-OK", res.status, body.slice(0, 160));
-    return [];
-  }
-  const json = await res.json().catch(() => ({}));
-  return Array.isArray(json?.data) ? json.data : [];
-}
-
-/** Favorites API (unchanged logic, now same-origin) */
-export async function listFavorites() {
-  const r = await authedFetch(`/favorites`, { cache: "no-store" });
-  return r.json() as Promise<{ items: any[] }>;
-}
-
-export async function addFavorite(payload: any) {
-  const r = await authedFetch(`/favorites`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ payload }),
+/** Generic helper */
+export async function getJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = apiUrl(path);
+  const res = await fetch(url, {
+    ...init,
+    // avoid stale suggestions during typing
+    cache: "no-store",
+    credentials: "same-origin",
   });
-  return r.json() as Promise<{ item: any }>;
+  if (!res.ok) {
+    let msg = `Request failed (${res.status})`;
+    try {
+      const j = await res.clone().json();
+      if ((j as any)?.error) msg = (j as any).error;
+    } catch {
+      const t = await res.clone().text().catch(() => "");
+      if (t) msg = t;
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function removeFavorite(id: string) {
-  const r = await authedFetch(`/favorites/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
-  return r.json() as Promise<{ ok: boolean }>;
+/** Public helper used by Airport fields */
+export async function searchPlaces(term: string) {
+  // NOTE: we call /api/places on the **same origin**
+  return getJSON<{ ok: boolean; data: any[] }>(`/api/places?q=${encodeURIComponent(term)}`);
 }

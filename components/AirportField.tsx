@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { searchPlaces } from "@/lib/api";
 
-type PlaceItem = {
+type Place = {
   code?: string;
   name: string;
   city?: string;
@@ -10,75 +11,42 @@ type PlaceItem = {
   label: string;
 };
 
-// New API props
-type NewProps = {
+export default function AirportField(props: {
   id?: string;
   label: string;
   placeholder?: string;
-  value?: string;                    // display text
-  onChange: (next: string) => void;  // selected IATA or raw text
+  /** legacy props used by app/page.tsx */
+  code?: string;
+  initialDisplay?: string;
+  onTextChange?: (display: string) => void;
+  onChangeCode?: (code: string, display: string) => void;
   autoFocus?: boolean;
-};
-
-// Legacy API props (what your app/page.tsx currently passes)
-type LegacyProps = {
-  id?: string;
-  label: string;
-  placeholder?: string;
-  code?: string;                             // selected IATA (optional)
-  initialDisplay?: string;                   // display text
-  onTextChange?: (display: string) => void;  // called as user types / when chosen
-  onChangeCode?: (code: string, display: string) => void; // when a suggestion picked
-  autoFocus?: boolean;
-};
-
-type Props = NewProps | LegacyProps;
-
-function isLegacy(p: Props): p is LegacyProps {
-  // if any legacy-only prop is present, treat as legacy
-  return (
-    "onChangeCode" in p ||
-    "onTextChange" in p ||
-    "initialDisplay" in p ||
-    "code" in p
-  );
-}
-
-function cn(...a: Array<string | false | undefined>) {
-  return a.filter(Boolean).join(" ");
-}
-
-export default function AirportField(props: Props) {
+}) {
   const {
     id,
     label,
     placeholder = "Type city or airport",
+    code,
+    initialDisplay = "",
+    onTextChange,
+    onChangeCode,
     autoFocus,
   } = props;
 
-  // Display text: from new API `value` or legacy `initialDisplay`
-  const initialDisplay = isLegacy(props)
-    ? props.initialDisplay ?? ""
-    : props.value ?? "";
-
-  const [term, setTerm] = useState<string>(initialDisplay);
+  const [term, setTerm] = useState(initialDisplay);
+  const [items, setItems] = useState<Place[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [everLoaded, setEverLoaded] = useState(false);
-  const [items, setItems] = useState<PlaceItem[]>([]);
   const [active, setActive] = useState(-1);
+  const [everLoaded, setEverLoaded] = useState(false);
 
   const boxRef = useRef<HTMLDivElement>(null);
   const ctrlRef = useRef<AbortController | null>(null);
-  const cache = useMemo(() => new Map<string, PlaceItem[]>(), []);
   const reqId = useRef(0);
+  const cache = useMemo(() => new Map<string, Place[]>(), []);
 
-  // sync external changes to display text (in case parent updates)
-  useEffect(() => {
-    setTerm(initialDisplay);
-  }, [initialDisplay]);
+  useEffect(() => setTerm(initialDisplay), [initialDisplay]);
 
-  // click-away
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -101,9 +69,9 @@ export default function AirportField(props: Props) {
       setLoading(false);
       return;
     }
-
     if (cache.has(q)) {
       setItems(cache.get(q)!);
+      setOpen(true);
       setLoading(false);
       setEverLoaded(true);
       return;
@@ -118,29 +86,10 @@ export default function AirportField(props: Props) {
       const my = ++reqId.current;
 
       try {
-        // always same-origin
         console.log("[AirportField] searching:", q);
-        const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`, {
-          cache: "no-store",
-          credentials: "same-origin",
-          signal: ac.signal,
-        });
-
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          console.warn("[AirportField] /api/places non-OK:", res.status, t.slice(0, 160));
-          if (my === reqId.current) {
-            setItems([]);
-            setOpen(true);
-            setEverLoaded(true);
-          }
-          return;
-        }
-
-        const json = await res.json().catch(() => ({}));
-        const list: PlaceItem[] = Array.isArray(json?.data) ? json.data : [];
+        const json = await searchPlaces(q); // always same-origin
+        const list: Place[] = Array.isArray(json?.data) ? json.data : [];
         cache.set(q, list);
-
         if (my === reqId.current) {
           console.log("[AirportField] results:", { count: list.length, sample: list.slice(0, 5) });
           setItems(list);
@@ -164,18 +113,11 @@ export default function AirportField(props: Props) {
     return () => clearTimeout(timer);
   }, [term, cache]);
 
-  // choosing an item
-  function choose(it: PlaceItem) {
+  function choose(it: Place) {
     const display = it.label || (it.code ? `${it.code} — ${it.name}` : it.name);
     setTerm(display);
-
-    if (isLegacy(props)) {
-      props.onTextChange?.(display);
-      if (it.code) props.onChangeCode?.(it.code, display);
-    } else {
-      props.onChange(it.code || display);
-    }
-
+    onTextChange?.(display);
+    if (it.code) onChangeCode?.(it.code, display);
     setOpen(false);
     setActive(-1);
   }
@@ -202,7 +144,7 @@ export default function AirportField(props: Props) {
     }
   }
 
-  const showNoMatches = everLoaded && !loading && term.trim().length >= 2 && items.length === 0;
+  const showNo = everLoaded && !loading && term.trim().length >= 2 && items.length === 0;
 
   return (
     <div ref={boxRef} className="relative w-full">
@@ -213,16 +155,10 @@ export default function AirportField(props: Props) {
       <input
         id={id}
         value={term}
-        autoFocus={autoFocus}
         onChange={(e) => {
           const v = e.target.value;
           setTerm(v);
-          // notify parents for both APIs as user types
-          if (isLegacy(props)) {
-            props.onTextChange?.(v);
-          } else {
-            props.onChange(v);
-          }
+          onTextChange?.(v);
         }}
         onFocus={() => term.trim().length >= 2 && setOpen(true)}
         onKeyDown={onKeyDown}
@@ -230,13 +166,11 @@ export default function AirportField(props: Props) {
         className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm
                    focus:border-blue-500 focus:ring-blue-500"
         autoComplete="off"
+        autoFocus={props.autoFocus}
       />
 
       {open && (
-        <div
-          className="absolute left-0 right-0 mt-1 max-h-80 overflow-auto rounded-md border border-gray-200
-                     bg-white shadow-lg z-50"
-        >
+        <div className="absolute left-0 right-0 mt-1 max-h-80 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg z-50">
           {loading && <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>}
 
           {!loading && items.length > 0 && (
@@ -246,26 +180,21 @@ export default function AirportField(props: Props) {
                   key={`${it.code ?? it.label}-${idx}`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(it)}
-                  className={cn(
-                    "px-3 py-2 text-sm cursor-pointer hover:bg-blue-50",
-                    active === idx && "bg-blue-50"
-                  )}
+                  className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${active === idx ? "bg-blue-50" : ""}`}
                 >
                   <div className="font-medium">
                     {it.code ? `${it.code} — ` : ""}
                     {it.name}
                   </div>
                   {(it.city || it.country) && (
-                    <div className="text-gray-600">
-                      {[it.city, it.country].filter(Boolean).join(", ")}
-                    </div>
+                    <div className="text-gray-600">{[it.city, it.country].filter(Boolean).join(", ")}</div>
                   )}
                 </li>
               ))}
             </ul>
           )}
 
-          {showNoMatches && <div className="px-3 py-2 text-sm text-gray-500">No matches</div>}
+          {showNo && <div className="px-3 py-2 text-sm text-gray-500">No matches</div>}
         </div>
       )}
     </div>
