@@ -1,4 +1,3 @@
-// components/AirportField.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -41,7 +40,7 @@ export default function AirportField(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // debounce fetch (>= 1 char)
+  // debounced fetch (>= 1 char)
   useEffect(() => {
     onTextChange?.(text);
 
@@ -56,7 +55,7 @@ export default function AirportField(props: {
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const json = await searchPlaces(text.trim()); // ALWAYS relative /api/places
+        const json = await searchPlaces(text.trim());      // ALWAYS relative /api/places
         const list = Array.isArray(json?.data) ? (json.data as Suggestion[]) : [];
         setItems(list);
         setDebug(list.length === 0 ? "No results" : "");

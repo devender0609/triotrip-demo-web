@@ -1,26 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { searchPlaces } from "../lib/api"; // relative import
 
-type Suggestion = {
-  code?: string;
-  name: string;
-  city?: string;
-  country?: string;
-  label: string;
-};
-
-async function fetchPlaces(term: string): Promise<{ items: Suggestion[]; debug: string }> {
-  const res = await fetch(`/api/places?q=${encodeURIComponent(term)}`, { cache: "no-store" });
-  const j = await res.json().catch(() => ({} as any));
-  const items: Suggestion[] = Array.isArray(j?.data) ? j.data : [];
-  const debug = !res.ok
-    ? `API ${res.status} ${res.statusText || ""} ${j?.error ? "- " + j.error : ""}`.trim()
-    : items.length === 0
-      ? `No results`
-      : "";
-  return { items, debug };
-}
+type Suggestion = { code?: string; name: string; city?: string; country?: string; label: string };
 
 export default function AirportInput({
   value,
@@ -53,10 +36,19 @@ export default function AirportInput({
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const { items, debug } = await fetchPlaces(term.trim());
-        setItems(items);
-        setDebug(debug);
+        const json = await searchPlaces(term.trim());      // RELATIVE /api/places
+        const list = Array.isArray(json?.data) ? json.data : [];
+        setItems(list);
+        setDebug(list.length === 0 ? "No results" : "");
         setOpen(true);
+        // eslint-disable-next-line no-console
+        console.log("[AirportInput] /api/places ->", { term, count: list.length, sample: list.slice(0, 5) });
+      } catch (err: any) {
+        setItems([]);
+        setDebug(err?.message || "API error");
+        setOpen(true);
+        // eslint-disable-next-line no-console
+        console.error("[AirportInput] fetch failed:", err);
       } finally {
         setLoading(false);
       }
@@ -66,40 +58,31 @@ export default function AirportInput({
   }, [term]);
 
   return (
-    <div className="ai-wrap">
+    <div style={{ position: "relative" }}>
       <input
         value={term}
         onChange={(e) => setTerm(e.target.value)}
         placeholder={placeholder}
-        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
         autoComplete="off"
+        onFocus={() => (items.length || debug ? setOpen(true) : undefined)}
       />
       {open && (
-        <div className="ai-pop">
-          {loading && <div className="ai-row muted">Searching…</div>}
-          {!loading && debug && <div className="ai-row error">{debug}</div>}
-          {!loading && !debug && items.length === 0 && <div className="ai-row muted">No matches</div>}
+        <div style={{ position: "absolute", left: 0, right: 0, top: 44, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, zIndex: 20, maxHeight: 280, overflow: "auto" }}>
+          {loading && <div style={{ padding: 10, color: "#64748b" }}>Searching…</div>}
+          {!loading && debug && <div style={{ padding: 10, color: "#b91c1c", fontWeight: 700 }}>{debug}</div>}
+          {!loading && !debug && items.length === 0 && <div style={{ padding: 10, color: "#64748b" }}>No matches</div>}
           {!loading && !debug && items.map((a) => (
             <div
               key={a.label}
-              className="ai-row"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { onChange(a.label); setTerm(a.label); setOpen(false); }}
+              style={{ padding: "10px 12px", cursor: "pointer", borderBottom: "1px dashed #e2e8f0" }}
             >
               {a.label}
             </div>
           ))}
         </div>
       )}
-      <style jsx>{`
-        .ai-wrap { position: relative; }
-        input { width: 100%; height: 40px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; }
-        .ai-pop { position: absolute; left: 0; right: 0; top: 44px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.08); z-index: 20; max-height: 280px; overflow: auto; }
-        .ai-row { padding: 10px 12px; cursor: pointer; }
-        .ai-row:hover { background: #f8fafc; }
-        .ai-row.muted { color: #64748b; cursor: default; }
-        .ai-row.error { color: #b91c1c; cursor: default; font-weight: 700; }
-      `}</style>
     </div>
   );
 }

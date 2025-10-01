@@ -1,4 +1,3 @@
-// lib/api.ts
 "use client";
 
 import { getSupa } from "./auth/supabase";
@@ -7,7 +6,7 @@ import { getSupa } from "./auth/supabase";
    INTERNAL: site-local API
    ---------------------------- */
 
-/** Autocomplete — ALWAYS call the relative route so it works on any domain */
+/** Autocomplete — ALWAYS call the relative route (same origin) */
 export async function searchPlaces(q: string) {
   const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`, {
     cache: "no-store",
