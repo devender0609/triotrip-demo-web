@@ -4,100 +4,147 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Place = { code: string; name: string; city?: string; country?: string; label: string };
-
-const LOCAL_SEED: Place[] = [
-  { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US", label: "BOS — Logan International Airport — Boston — US" },
-  { code: "AUS", name: "Austin-Bergstrom International Airport", city: "Austin", country: "US", label: "AUS — Austin-Bergstrom International — Austin — US" },
-  { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US", label: "MIA — Miami International Airport — Miami — US" },
+/** very small “always works” seed so the UI never feels empty while we debug */
+const LOCAL_SEED = [
+  { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US" },
+  { code: "AUS", name: "Austin–Bergstrom International Airport", city: "Austin", country: "US" },
+  { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US" },
 ];
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const q = (searchParams.get("q") || "").trim();
+type DuffelPlace =
+  | { iata_code?: string; name?: string; city_name?: string; country?: string; type?: string }
+  | { code?: string; name?: string; city?: string; country?: string; type?: string };
 
-  if (q.length < 2) {
+function normalize(items: DuffelPlace[]) {
+  return items
+    .map((p) => {
+      const code = (p as any).iata_code ?? (p as any).code ?? "";
+      const name = p.name ?? "";
+      const city = (p as any).city_name ?? (p as any).city ?? "";
+      const country = p.country ?? "";
+      if (!code || !name) return null;
+      return {
+        code,
+        name,
+        city,
+        country,
+        label: `${code} — ${name}${city ? ` — ${city}` : ""}${country ? ` — ${country}` : ""}`,
+      };
+    })
+    .filter(Boolean) as Array<{ code: string; name: string; city: string; country: string; label: string }>;
+}
+
+async function tryDuffel(query: string, version: string, url: URL, extraHeaders?: HeadersInit) {
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${process.env.DUFFEL_KEY ?? ""}`,
+    "Duffel-Version": version,
+    Accept: "application/json",
+    ...(extraHeaders || {}),
+  };
+
+  const res = await fetch(url.toString(), { headers, cache: "no-store" });
+  const status = res.status;
+  const text = await res.text().catch(() => "");
+  let json: any = null;
+  try { json = text ? JSON.parse(text) : null; } catch {}
+
+  // Duffel commonly returns 200 with {data:[...]} (v1) or {data:[...]} (v2).
+  let data: any[] = [];
+  if (json?.data && Array.isArray(json.data)) data = json.data;
+
+  return { status, json, data, sentVersion: version, sentUrl: url.toString() };
+}
+
+export async function GET(req: Request) {
+  const u = new URL(req.url);
+  const q = (u.searchParams.get("q") || u.searchParams.get("name") || "").trim();
+  if (!q) {
     return NextResponse.json({ ok: true, source: "empty", data: [] });
   }
 
-  // Force v1 regardless of env (your env is still beta somewhere).
-  const DUFFEL_KEY = process.env.DUFFEL_KEY || process.env.DUFFEL_API_KEY || "";
-  const DUFFEL_VERSION = "v1";
+  const hasDuffelKey = !!process.env.DUFFEL_KEY;
 
-  // Map Duffel -> UI
-  const mapDuffel = (j: any): Place[] =>
-    Array.isArray(j?.data)
-      ? j.data
-          .map((p: any) => {
-            const code = p.iata_code || p.iata_city_code || "";
-            const name = p.name || p.city_name || p.subdivision_name || p.country_name || "";
-            const city = p.city_name || undefined;
-            const country = p.country_code || p.country_name || undefined;
-            const label = `${code} — ${name}${city ? ` — ${city}` : ""}${country ? ` — ${country}` : ""}`;
-            return { code, name, city, country, label };
-          })
-          .filter((x: Place) => x.code && x.name)
-      : [];
+  // Build several candidates that cover v2 & v1 shapes and param names
+  const candidates: Array<{ version: string; url: URL }> = [];
+  const qEnc = encodeURIComponent(q);
 
-  // Try Duffel first
-  if (DUFFEL_KEY) {
-    try {
-      const qs = new URLSearchParams();
-      qs.set("name", q);
-      qs.set("limit", "12");
-      qs.append("types[]", "airport");
-      qs.append("types[]", "city");
+  // v2 (documented) – endpoint usually lives under /air/
+  candidates.push({
+    version: process.env.DUFFEL_VERSION || "v2",
+    url: new URL(`https://api.duffel.com/air/places/suggestions?query=${qEnc}&types[]=airport&types[]=city&limit=12`),
+  });
 
-      const url = `https://api.duffel.com/places/suggestions?${qs.toString()}`;
+  // v2 alternate: some accounts accept ?name=
+  candidates.push({
+    version: process.env.DUFFEL_VERSION || "v2",
+    url: new URL(`https://api.duffel.com/air/places/suggestions?name=${qEnc}&types[]=airport&types[]=city&limit=12`),
+  });
 
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${DUFFEL_KEY}`,
-          "Duffel-Version": DUFFEL_VERSION, // <- forced v1
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      });
+  // v1 legacy (no /air prefix)
+  candidates.push({
+    version: "v1",
+    url: new URL(`https://api.duffel.com/places/suggestions?name=${qEnc}&types[]=airport&types[]=city&limit=12`),
+  });
 
-      if (res.ok) {
-        const j = await res.json();
-        const items = mapDuffel(j);
-        return NextResponse.json({
-          ok: true,
-          source: "duffel",
-          meta: { sentVersion: DUFFEL_VERSION, count: items.length },
-          data: items,
-        });
-      } else {
-        const errorText = await res.text().catch(() => "");
-        return NextResponse.json({
-          ok: true,
-          source: "duffel-error",
-          status: res.status,
-          meta: { sentVersion: DUFFEL_VERSION },
-          error: errorText,
-          data: [],
-        });
+  // last resort – old beta (only if someone still has env=beta)
+  candidates.push({
+    version: "beta",
+    url: new URL(`https://api.duffel.com/places/suggestions?name=${qEnc}&types[]=airport&types[]=city&limit=12`),
+  });
+
+  let firstGood: { status: number; json: any; data: any[]; sentVersion: string; sentUrl: string } | null = null;
+  let lastError: any = null;
+  let tries: any[] = [];
+
+  if (hasDuffelKey) {
+    for (const cand of candidates) {
+      try {
+        const r = await tryDuffel(q, cand.version, cand.url);
+        tries.push({ status: r.status, sentVersion: r.sentVersion, url: r.sentUrl, count: r.data?.length ?? 0 });
+        if (r.status >= 200 && r.status < 300 && Array.isArray(r.data)) {
+          firstGood = r;
+          break;
+        }
+        lastError = r.json || r.status;
+      } catch (e: any) {
+        lastError = e?.message || String(e);
       }
-    } catch (e: any) {
-      // fall through to seed
-      // eslint-disable-next-line no-console
-      console.error("Duffel fetch failed:", e?.message || e);
     }
   }
 
-  // Fallback local matches so UI still shows something
-  const needle = q.toLowerCase();
+  // Prefer Duffel if it worked
+  if (firstGood && Array.isArray(firstGood.data) && firstGood.data.length > 0) {
+    return NextResponse.json({
+      ok: true,
+      source: "duffel",
+      data: normalize(firstGood.data),
+      meta: {
+        hasDuffelKey,
+        tries,
+        duffelVersionPicked: firstGood.sentVersion,
+      },
+    });
+  }
+
+  // Fallback: a filtered local seed so the UI remains responsive
+  const lc = q.toLowerCase();
   const seeded = LOCAL_SEED.filter(
     (p) =>
-      p.code.toLowerCase().includes(needle) ||
-      p.name.toLowerCase().includes(needle) ||
-      (p.city?.toLowerCase() || "").includes(needle)
+      p.code.toLowerCase().includes(lc) ||
+      p.city.toLowerCase().includes(lc) ||
+      p.name.toLowerCase().includes(lc),
   );
 
   return NextResponse.json({
     ok: true,
     source: "local-seed",
-    data: seeded,
+    data: normalize(seeded),
+    meta: {
+      hasDuffelKey,
+      duffelTried: hasDuffelKey,
+      duffelStatus: firstGood?.status ?? (lastError ? 400 : 0),
+      duffelError: lastError ? JSON.stringify(lastError) : undefined,
+      tries,
+    },
   });
 }

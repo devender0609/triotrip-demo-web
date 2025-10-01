@@ -1,105 +1,119 @@
+// components/AirportField.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-type Place = { code: string; name: string; city?: string; country?: string; label: string };
+type Item = { code: string; name: string; city?: string; country?: string; label: string };
 
 export default function AirportField(props: {
+  id: string;
   label: string;
-  code: string;
-  initialDisplay: string;
-  onTextChange: (v: string) => void;
-  onChangeCode: (code: string, display: string) => void;
+  value?: string;
+  onChange: (next: string) => void;
   autoFocus?: boolean;
 }) {
-  const { label, code, initialDisplay, onTextChange, onChangeCode, autoFocus } = props;
-
-  const [term, setTerm] = useState(initialDisplay || code || "");
+  const { id, label, value = "", onChange, autoFocus } = props;
+  const [term, setTerm] = useState(value);
+  const [items, setItems] = useState<Item[]>([]);
   const [open, setOpen] = useState(false);
-  const [options, setOptions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
-  const lastIssued = useRef(0);
+  const acRef = useRef<AbortController | null>(null);
 
-  useEffect(() => setTerm(initialDisplay || code || ""), [initialDisplay, code]);
-  useEffect(() => onTextChange?.(term), [term, onTextChange]);
-
+  // debounced search
   useEffect(() => {
-    const t = term.trim();
-    if (t.length < 2) {
-      setOptions([]);
-      setOpen(false);
+    if (!term || term.trim().length < 2) {
+      setItems([]);
       return;
     }
     setLoading(true);
-    const id = ++lastIssued.current;
-    const handle = setTimeout(async () => {
+    setOpen(true);
+
+    // cancel previous
+    acRef.current?.abort();
+    const ac = new AbortController();
+    acRef.current = ac;
+
+    const t = setTimeout(async () => {
       try {
-        const url = `/api/places?q=${encodeURIComponent(t)}`;
-        const res = await fetch(url, { cache: "no-store" });
-        const j = await res.json().catch(() => ({}));
-        const items: Place[] = Array.isArray(j?.data) ? j.data : [];
-        if (id === lastIssued.current) {
-          setOptions(items);
-          setOpen(true);
+        const url = `/api/places?q=${encodeURIComponent(term.trim())}`;
+        // helpful log in case we need to debug on prod
+        console.log("[AirportField] /api/places -> %s", url);
+        const res = await fetch(url, { signal: ac.signal, cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
+        const arr: Item[] = Array.isArray(j?.data) ? j.data : [];
+        setItems(arr);
+        setOpen(true);
+        setLoading(false);
+      } catch (err: any) {
+        if (err?.name !== "AbortError") {
+          console.warn("[AirportField] search failed:", err);
         }
-      } catch {
-        if (id === lastIssued.current) {
-          setOptions([]);
-          setOpen(true);
-        }
-      } finally {
-        if (id === lastIssued.current) setLoading(false);
+        setLoading(false);
       }
-    }, 200);
-    return () => clearTimeout(handle);
+    }, 200); // 200ms debounce
+
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
   }, [term]);
 
-  const onPick = (p: Place) => {
-    onChangeCode?.(p.code, p.label);
-    setTerm(p.label);
+  // pick one
+  const pick = (it: Item) => {
+    onChange(it.code);
+    setTerm(`${it.code} — ${it.name}${it.city ? ` — ${it.city}` : ""}`);
     setOpen(false);
   };
 
-  const placeholder = useMemo(() => (label ? label : "Type city or airport"), [label]);
-
+  // Render
   return (
-    <div className="relative w-full">
-      <input
-        className="w-full h-11 px-4 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-[15px]"
-        placeholder={placeholder}
-        value={term}
-        onChange={(e) => setTerm(e.target.value)}
-        onFocus={() => term.trim().length >= 2 && setOpen(true)}
-        autoFocus={autoFocus}
-        autoComplete="off"
-      />
+    <div className="flex-1 min-w-[260px]">
+      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+      </label>
 
-      {open && (
-        <div
-          className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg"
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {loading && <div className="px-4 py-3 text-sm text-gray-500">Searching…</div>}
+      <div className="relative">
+        <input
+          id={id}
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          onFocus={() => term.length >= 2 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Type city or airport"
+          autoFocus={autoFocus}
+          className="w-full rounded-md border px-3 py-2 text-[15px] shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+        />
 
-          {!loading && options.length > 0 && (
-            <ul className="divide-y divide-gray-100">
-              {options.map((p) => (
-                <li
-                  key={`${p.code}-${p.label}`}
-                  className="px-4 py-3 cursor-pointer hover:bg-gray-50"
-                  onClick={() => onPick(p)}
-                >
-                  <div className="font-medium">{p.label}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {!loading && options.length === 0 && (
-            <div className="px-4 py-3 text-sm text-gray-500">No matches</div>
-          )}
-        </div>
-      )}
+        {open && (
+          <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-white shadow-lg">
+            {loading && (
+              <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
+            )}
+            {!loading && items.length === 0 && (
+              <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+            )}
+            {items.map((it) => (
+              <button
+                key={`${it.code}-${it.name}`}
+                type="button"
+                className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-gray-50"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(it)}
+                aria-label={it.label}
+              >
+                <div className="shrink-0 font-mono text-sm font-semibold">{it.code}</div>
+                <div className="grow">
+                  <div className="text-sm">{it.name}</div>
+                  <div className="text-xs text-gray-500">
+                    {it.city || "-"}{it.country ? `, ${it.country}` : ""}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
