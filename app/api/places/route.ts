@@ -1,159 +1,153 @@
+// app/api/places/route.ts
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const runtime = "nodejs";
 
-// Read YOUR var name first (you said it's DUFFEL_KEY)
-const DUFFEL =
-  process.env.DUFFEL_KEY ||
-  process.env.DUFFEL_API_KEY ||
-  process.env.DUFFEL_TOKEN ||
-  "";
+// ---------- helpers ----------
+type Place = { code: string; name: string; city: string; country?: string };
+type Out = { ok: boolean; source: string; data: Array<Place & { label: string }>; meta?: any };
 
-// Map Duffel suggestion -> UI shape
-function mapDuffel(p: any) {
-  const code = p?.iata_code || p?.iata || null;
-  const city = p?.city?.name || p?.city_name || p?.city || "";
-  const country = p?.country_name || p?.country || p?.country?.name || "";
-  const name = p?.name || p?.airport_name || p?.full_name || "";
-  const parts = [code, name, city, country].filter(Boolean);
-  return {
-    code: code || undefined,
-    name: name || city || "",
-    city: city || undefined,
-    country: country || undefined,
-    label: parts.length ? parts.join(" — ") : (code || name || city || "Unknown"),
-  };
+const DUFFEL_KEY = process.env.DUFFEL_KEY ?? "";
+const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v1"; // ← IMPORTANT: use "v1"
+
+// Nice, small fallback so the UI never looks “dead”
+const LOCAL_SEED: Place[] = [
+  { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US" },
+  { code: "AUS", name: "Austin–Bergstrom International Airport", city: "Austin", country: "US" },
+  { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US" },
+  { code: "JFK", name: "John F. Kennedy International Airport", city: "New York", country: "US" },
+  { code: "SFO", name: "San Francisco International Airport", city: "San Francisco", country: "US" },
+  { code: "LHR", name: "Heathrow Airport", city: "London", country: "GB" }
+];
+
+function toLabel(p: Place) {
+  return `${p.code} — ${p.name} — ${p.city}${p.country ? ` — ${p.country}` : ""}`;
 }
 
-async function fallbackTeleport(q: string) {
-  try {
-    const u = `https://api.teleport.org/api/cities/?search=${encodeURIComponent(q)}&limit=6`;
-    const r = await fetch(u, { cache: "no-store" });
-    const j = await r.json();
-    const items = (j?._embedded?.["city:search-results"] || []).map((it: any) => {
-      const name: string =
-        it?.matching_full_name ||
-        it?.matching_alternate_names?.[0]?.name ||
-        it?.matching_city ||
-        "";
-      const label = name || "Unknown city";
-      return { code: undefined, name: label, city: label, country: undefined, label };
-    });
-    return items;
-  } catch {
-    return [];
-  }
+function filterLocalSeed(term: string) {
+  const t = term.toLowerCase();
+  return LOCAL_SEED.filter(
+    (p) =>
+      p.code.toLowerCase().includes(t) ||
+      p.city.toLowerCase().includes(t) ||
+      p.name.toLowerCase().includes(t)
+  )
+    .slice(0, 12)
+    .map((p) => ({ ...p, label: toLabel(p) }));
 }
 
-// Absolute last-resort local seed so UI isn’t blank while configuring env
-function fallbackLocal(q: string) {
-  const seed = [
-    { code: "BOS", name: "Logan International Airport", city: "Boston", country: "US" },
-    { code: "AUS", name: "Austin-Bergstrom International Airport", city: "Austin", country: "US" },
-    { code: "MIA", name: "Miami International Airport", city: "Miami", country: "US" },
-    { code: "SFO", name: "San Francisco International Airport", city: "San Francisco", country: "US" },
-    { code: "LHR", name: "Heathrow Airport", city: "London", country: "UK" },
-  ];
-  const term = q.toLowerCase();
-  return seed
-    .filter(
-      (x) =>
-        x.code.toLowerCase().includes(term) ||
-        x.city.toLowerCase().includes(term) ||
-        x.name.toLowerCase().includes(term)
-    )
-    .map((x) => ({
-      ...x,
-      label: [x.code, x.name, x.city, x.country].filter(Boolean).join(" — "),
-    }));
-}
-
+// ---------- GET /api/places?q=bos ----------
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const q = (url.searchParams.get("q") || "").trim();
-  const diag = url.searchParams.get("diag"); // add &diag=1 to see meta in response
-
-  if (!q) {
-    return NextResponse.json({ ok: true, source: "empty", data: [] }, { status: 200 });
-  }
+  const { searchParams } = new URL(req.url);
+  const qRaw = searchParams.get("q") || "";
+  const q = qRaw.trim();
 
   const meta: any = {
-    hasDuffelKey: Boolean(DUFFEL),
+    hasDuffelKey: Boolean(DUFFEL_KEY),
     duffelTried: false,
-    duffelStatus: null as null | number,
+    duffelStatus: undefined as number | undefined,
     duffelCount: 0,
-    duffelError: null as null | string,
     teleportTried: false,
-    teleportCount: 0,
+    teleportCount: 0
   };
 
-  // 1) Duffel (if key present)
-  let duffelItems: any[] = [];
-  if (DUFFEL) {
+  // very short queries → cheap local seed
+  if (q.length < 2) {
+    return NextResponse.json<Out>({
+      ok: true,
+      source: "empty",
+      data: []
+    });
+  }
+
+  // 1) Duffel (primary)
+  if (DUFFEL_KEY) {
     meta.duffelTried = true;
     try {
-      const duffelUrl =
-        `https://api.duffel.com/air/places/suggestions?` +
-        `name=${encodeURIComponent(q)}&types[]=airport&types[]=city&limit=8`;
+      const url =
+        "https://api.duffel.com/places/suggestions?" +
+        new URLSearchParams({
+          name: q,
+          limit: "12",
+          "types[]": "airport",
+          "types[]": "city"
+        }).toString();
 
-      const res = await fetch(duffelUrl, {
+      const res = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${DUFFEL}`,
-          "Duffel-Version": "v2",
+          Authorization: `Bearer ${DUFFEL_KEY}`,
           Accept: "application/json",
+          "Duffel-Version": DUFFEL_VERSION // ← must be "v1"
         },
-        cache: "no-store",
+        // ensure edge compatibility
+        cache: "no-store"
       });
 
       meta.duffelStatus = res.status;
 
-      const raw = await res.text();
-      let json: any = {};
-      try { json = raw ? JSON.parse(raw) : {}; } catch {}
+      if (res.ok) {
+        const json: any = await res.json();
+        const items = (json?.data || []).map((d: any) => {
+          const code = d?.iata_code || d?.iata_city_code || d?.id || "";
+          const name = d?.name || d?.municipality_name || d?.type || "";
+          const city = d?.city?.name || d?.city_name || d?.iata_city_code || "";
+          const country = d?.city?.country_code || d?.country_code || "";
+          const p: Place = { code, name, city, country };
+          return { ...p, label: toLabel(p) };
+        }).filter((x: any) => x.code && x.name);
 
-      if (res.ok && Array.isArray(json?.data)) {
-        duffelItems = json.data.map(mapDuffel).filter((x: any) => x?.label);
-        meta.duffelCount = duffelItems.length;
+        meta.duffelCount = items.length;
+
+        if (items.length > 0) {
+          return NextResponse.json<Out>({
+            ok: true,
+            source: "duffel",
+            data: items,
+            meta
+          });
+        }
       } else {
-        meta.duffelError = raw?.slice(0, 300) || "Duffel non-OK";
+        // keep the error string for debugging in /api/places
+        meta.duffelError = await res.text().catch(() => "");
       }
     } catch (e: any) {
-      meta.duffelError = e?.message || String(e);
+      meta.duffelError = String(e?.message || e);
     }
   }
 
-  if (duffelItems.length > 0) {
-    return NextResponse.json(
-      { ok: true, source: "duffel", data: duffelItems, ...(diag ? { meta } : {}) },
-      { status: 200 }
+  // 2) Teleport (secondary; coarse grain city list)
+  try {
+    meta.teleportTried = true;
+    const resp = await fetch(
+      "https://api.teleport.org/api/cities/?limit=10&search=" + encodeURIComponent(q),
+      { cache: "no-store" }
     );
+    if (resp.ok) {
+      const j: any = await resp.json();
+      const items = (j?._embedded?.["city:search-results"] || []).map((r: any) => {
+        const match = r?.matching_full_name || "";
+        // Try to synthesize a code from airport-like bits if present, otherwise use city name
+        const city = match.split(",")[0] || match;
+        const p: Place = { code: city.slice(0, 3).toUpperCase(), name: city, city };
+        return { ...p, label: toLabel(p) };
+      });
+      meta.teleportCount = items.length;
+
+      if (items.length > 0) {
+        return NextResponse.json<Out>({ ok: true, source: "teleport", data: items, meta });
+      }
+    }
+  } catch {
+    // ignore teleport errors
   }
 
-  // 2) Teleport fallback
-  meta.teleportTried = true;
-  const tele = await fallbackTeleport(q);
-  meta.teleportCount = tele.length;
-
-  if (tele.length > 0) {
-    return NextResponse.json(
-      { ok: true, source: "teleport", data: tele, ...(diag ? { meta } : {}) },
-      { status: 200 }
-    );
-  }
-
-  // 3) Local seed (last resort so UI shows *something*)
-  const seeded = fallbackLocal(q);
-  if (seeded.length > 0) {
-    return NextResponse.json(
-      { ok: true, source: "local-seed", data: seeded, ...(diag ? { meta } : {}) },
-      { status: 200 }
-    );
-  }
-
-  return NextResponse.json(
-    { ok: true, source: "empty", data: [], ...(diag ? { meta } : {}) },
-    { status: 200 }
-  );
+  // 3) Local seed fallback so UI is never empty
+  const seeded = filterLocalSeed(q);
+  return NextResponse.json<Out>({
+    ok: true,
+    source: "local-seed",
+    data: seeded,
+    meta
+  });
 }
