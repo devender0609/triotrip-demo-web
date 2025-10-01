@@ -1,118 +1,30 @@
 "use client";
 
+/**
+ * lib/api.ts — same-origin helpers
+ *
+ * - No NEXT_PUBLIC_*BASE — we always call Next routes on the same origin.
+ * - Safe auth header via Supabase (when available).
+ * - Strong error messages (tries JSON, then text).
+ * - Console logs so you can see exactly what’s called.
+ */
+
 import { getSupa } from "./auth/supabase";
 
-/* =========================================================================
-   SAME-ORIGIN HELPERS
-   ======================================================================== */
+/* ---------------- internal utils ---------------- */
 
-/** Build a same-origin absolute URL from a path when in the browser. */
-function sameOriginUrl(path: string) {
+function toSameOrigin(path: string): string {
+  // In the browser, turn "/api/..." into "https://<origin>/api/..."
   try {
     if (typeof window !== "undefined" && window.location?.origin) {
       return new URL(path, window.location.origin).toString();
     }
   } catch {}
-  return path; // SSR/unknown env fallback keeps it relative
+  return path; // SSR or unexpected — let fetch handle it
 }
-
-/**
- * Decide API base for *client-side* authed calls.
- * - On Vercel (non-localhost), FORCE same-origin to avoid CORS/localhost leaks.
- * - On localhost, if NEXT_PUBLIC_API_BASE is a full http(s) URL, allow it (dev).
- */
-const RAW_BASE =
-  typeof process !== "undefined" ? process.env.NEXT_PUBLIC_API_BASE : undefined;
-
-function effectiveBase(): string {
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    const isLocal =
-      host === "localhost" || host === "127.0.0.1" || host === "::1";
-    if (!isLocal) {
-      // On production/preview domains: always same-origin
-      return "";
-    }
-  }
-  // Local dev (SSR or browser): honor full http(s) URL if provided
-  if (RAW_BASE && /^https?:\/\//i.test(RAW_BASE)) return RAW_BASE;
-  return ""; // otherwise same-origin
-}
-
-/** Build the final URL for authed calls. */
-function urlFor(path: string) {
-  const base = effectiveBase();
-  return base ? `${base}${path}` : sameOriginUrl(path);
-}
-
-/* =========================================================================
-   PLACES AUTOCOMPLETE (PUBLIC) — ALWAYS SAME-ORIGIN
-   ======================================================================== */
-
-export async function searchPlaces(q: string) {
-  const url = sameOriginUrl(`/api/places?q=${encodeURIComponent(q)}`);
-
-  // Debug in browser console
-  // eslint-disable-next-line no-console
-  console.log("[searchPlaces] requesting", url);
-
-  let res: Response;
-  try {
-    // Optional safety timeout so a hung fetch doesn't mask issues
-    const ctl = new AbortController();
-    const to = setTimeout(() => ctl.abort(), 8000);
-
-    res = await fetch(url, {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: ctl.signal,
-    }).finally(() => clearTimeout(to));
-  } catch (e: any) {
-    // eslint-disable-next-line no-console
-    console.error("[searchPlaces] fetch threw:", {
-      name: e?.name,
-      message: e?.message || String(e),
-      cause: e?.cause ?? null,
-    });
-    throw e;
-  }
-
-  // eslint-disable-next-line no-console
-  console.log("[searchPlaces] response", res.status, res.ok);
-
-  if (!res.ok) {
-    let message = `API error (${res.status})`;
-    try {
-      const j = await res.clone().json();
-      if (j?.error) message = j.error;
-    } catch {
-      try {
-        const t = await res.clone().text();
-        if (t) message = t;
-      } catch {}
-    }
-    // eslint-disable-next-line no-console
-    console.error("[searchPlaces] non-OK", message);
-    throw new Error(message);
-  }
-
-  return res.json() as Promise<{
-    data: Array<{
-      label: string;
-      code?: string;
-      name: string;
-      city?: string;
-      country?: string;
-    }>;
-  }>;
-}
-
-/* =========================================================================
-   AUTHED BACKEND CALLS (FAVORITES, ETC.)
-   ======================================================================== */
 
 async function getToken(): Promise<string | null> {
-  const supa = getSupa();
+  const supa = getSupa?.();
   if (!supa) return null;
   try {
     const { data } = await supa.auth.getSession();
@@ -128,70 +40,121 @@ function redirectToLogin() {
   window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
-/** Fetch helper that adds Authorization when available and uses safe base URL. */
-async function authedFetch(path: string, init: RequestInit = {}) {
-  const url = urlFor(path);
-
+/** Low-level JSON requester with good error surfacing */
+async function requestJSON<T = any>(
+  path: string,
+  init: RequestInit = {},
+  opts?: { requireAuth?: boolean }
+): Promise<T> {
+  const url = toSameOrigin(path);
   const token = await getToken();
-  const headers = {
-    ...(init.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+
+  const headers: Record<string, string> = {
+    ...(init.headers as Record<string, string>),
   };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (!headers["Content-Type"] && init.body) headers["Content-Type"] = "application/json";
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...init,
-      headers,
-      credentials: "same-origin",
-    });
-  } catch (e: any) {
-    // eslint-disable-next-line no-console
-    console.error("[authedFetch] network error:", e?.message || e);
-    throw e;
-  }
+  // eslint-disable-next-line no-console
+  console.log("[api] fetch", { url, method: init.method || "GET" });
 
-  if (res.status === 401) {
+  const res = await fetch(url, {
+    cache: "no-store",
+    credentials: "same-origin",
+    ...init,
+    headers,
+  });
+
+  if (res.status === 401 && opts?.requireAuth) {
     redirectToLogin();
     throw new Error("Please log in to continue.");
   }
 
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`;
+  // Try to parse JSON; if that fails, fall back to text
+  let data: any = null;
+  let text = "";
+  try {
+    data = await res.clone().json();
+  } catch {
     try {
-      const j = await res.clone().json();
-      if (j?.error) message = j.error;
+      text = await res.clone().text();
     } catch {
-      try {
-        const t = await res.clone().text();
-        if (t) message = t;
-      } catch {}
+      /* no-op */
     }
-    throw new Error(message);
   }
 
-  return res;
+  if (!res.ok) {
+    const msg =
+      (data && (data.error || data.message)) ||
+      (text && text.slice(0, 300)) ||
+      `Request failed (${res.status})`;
+    // eslint-disable-next-line no-console
+    console.error("[api] non-OK", { url, status: res.status, msg });
+    throw new Error(msg);
+  }
+
+  return (data ?? (text as unknown)) as T;
 }
 
-/** Favorites API */
-export async function listFavorites() {
-  const r = await authedFetch(`/favorites`, { cache: "no-store" });
-  return r.json() as Promise<{ items: any[] }>;
+/* ---------------- public helpers ---------------- */
+
+/**
+ * Places autocomplete (same-origin)
+ * Expects your Next route at /api/places to return: { ok: true, data: Array<{ label, code?, name, city?, country? }> }
+ */
+export async function searchPlaces(q: string): Promise<{
+  ok?: boolean;
+  source?: string;
+  data: Array<{ label: string; code?: string; name: string; city?: string; country?: string }>;
+}> {
+  const url = `/api/places?q=${encodeURIComponent(q)}`;
+  try {
+    const json = await requestJSON(url);
+    // eslint-disable-next-line no-console
+    console.log("[searchPlaces] ok", { q, count: Array.isArray(json?.data) ? json.data.length : 0, source: json?.source });
+    return json;
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.error("[searchPlaces] failed", e?.message || String(e));
+    throw e;
+  }
 }
 
-export async function addFavorite(payload: any) {
-  const r = await authedFetch(`/favorites`, {
+/**
+ * Main trip search (same-origin)
+ * Your Next route should be implemented at /api/search (POST) to avoid CORS.
+ */
+export async function postSearch(payload: any): Promise<{
+  results: any[];
+  hotelWarning?: string | null;
+}> {
+  return requestJSON(`/api/search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ payload }),
+    body: JSON.stringify(payload),
   });
-  return r.json() as Promise<{ item: any }>;
 }
 
-export async function removeFavorite(id: string) {
-  const r = await authedFetch(
-    `/favorites/${encodeURIComponent(id)}`,
-    { method: "DELETE" }
+/* ---------------- favorites API (same-origin) ---------------- */
+
+export async function listFavorites(): Promise<{ items: any[] }> {
+  return requestJSON(`/api/favorites`, {}, { requireAuth: true });
+}
+
+export async function addFavorite(payload: any): Promise<{ item: any }> {
+  return requestJSON(
+    `/api/favorites`,
+    {
+      method: "POST",
+      body: JSON.stringify({ payload }),
+    },
+    { requireAuth: true }
   );
-  return r.json() as Promise<{ ok: boolean }>;
+}
+
+export async function removeFavorite(id: string): Promise<{ ok: boolean }> {
+  return requestJSON(
+    `/api/favorites/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    { requireAuth: true }
+  );
 }

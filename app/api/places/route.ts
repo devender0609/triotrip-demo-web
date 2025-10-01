@@ -5,12 +5,17 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-// Server-only env: make sure this is set in Vercel project settings
-const DUFFEL_KEY = process.env.DUFFEL_API_KEY || process.env.DUFFEL_TOKEN || "";
+// Read your key exactly as you set it in Vercel: DUFFEL_KEY=duffel_test_...
+// Also allow a few alternates so it works if you ever rename it.
+const DUFFEL =
+  process.env.DUFFEL_KEY ||
+  process.env.DUFFEL_API_KEY ||
+  process.env.DUFFEL_TOKEN ||
+  "";
 
-// Map Duffel suggestion to our shape
+// Normalize Duffel suggestion into our UI shape
 function mapDuffel(p: any) {
-  const code = p?.iata_code || p?.iata_code_v1 || p?.iata || null;
+  const code = p?.iata_code || p?.iata || null;
   const city = p?.city?.name || p?.city_name || p?.city || "";
   const country = p?.country_name || p?.country || p?.country?.name || "";
   const name = p?.name || p?.airport_name || p?.full_name || "";
@@ -24,24 +29,24 @@ function mapDuffel(p: any) {
   };
 }
 
-// Fallback: Teleport city search -> top few cities
+// Fallback: Teleport city suggestions so the UI never shows empty purely due to Duffel
 async function fallbackTeleport(q: string) {
   try {
-    const u = `https://api.teleport.org/api/cities/?search=${encodeURIComponent(q)}&limit=5`;
+    const u = `https://api.teleport.org/api/cities/?search=${encodeURIComponent(q)}&limit=6`;
     const r = await fetch(u, { cache: "no-store" });
     const j = await r.json();
     const items = (j?._embedded?.["city:search-results"] || []).map((it: any) => {
-      const name: string = it?.matching_full_name || it?.matching_alternate_names?.[0]?.name || "";
-      return {
-        code: undefined,
-        name,
-        city: name,
-        country: undefined,
-        label: name,
-      };
+      const name: string =
+        it?.matching_full_name ||
+        it?.matching_alternate_names?.[0]?.name ||
+        it?.matching_city ||
+        "";
+      const label = name || "Unknown city";
+      return { code: undefined, name: label, city: label, country: undefined, label };
     });
     return items;
-  } catch {
+  } catch (e: any) {
+    console.warn("[/api/places] Teleport fetch failed:", e?.message || String(e));
     return [];
   }
 }
@@ -51,15 +56,14 @@ export async function GET(req: Request) {
   const q = (url.searchParams.get("q") || "").trim();
 
   if (!q) {
-    return NextResponse.json({ ok: true, data: [] }, { status: 200 });
+    return NextResponse.json({ ok: true, source: "empty", data: [] }, { status: 200 });
   }
 
-  // Debug banner in logs
-  console.log("[/api/places] q=%s, duffelKey? %s", q, DUFFEL_KEY ? "yes" : "no");
+  console.log("[/api/places] q=%s, hasDuffelKey=%s", q, DUFFEL ? "yes" : "no");
 
-  // Try Duffel first, if we have a key
+  // Try Duffel first if we have a key
   let duffelItems: any[] = [];
-  if (DUFFEL_KEY) {
+  if (DUFFEL) {
     try {
       const duffelUrl =
         `https://api.duffel.com/air/places/suggestions?` +
@@ -67,44 +71,44 @@ export async function GET(req: Request) {
 
       const duffelRes = await fetch(duffelUrl, {
         headers: {
-          Authorization: `Bearer ${DUFFEL_KEY}`,
-          "Duffel-Version": "v2",          // IMPORTANT: v2, not "beta"
+          Authorization: `Bearer ${DUFFEL}`,
+          "Duffel-Version": "v2", // IMPORTANT: use v2 (not "beta")
           Accept: "application/json",
         },
         cache: "no-store",
       });
 
-      const text = await duffelRes.text();
+      const raw = await duffelRes.text(); // safe for logging
       let json: any = {};
-      try { json = text ? JSON.parse(text) : {}; } catch {}
+      try { json = raw ? JSON.parse(raw) : {}; } catch {}
 
-      console.log("[/api/places] Duffel status=%d ok=%s count=%s",
-        duffelRes.status, String(duffelRes.ok),
+      console.log(
+        "[/api/places] Duffel status=%d ok=%s count=%s",
+        duffelRes.status,
+        String(duffelRes.ok),
         Array.isArray(json?.data) ? json.data.length : "n/a"
       );
 
       if (duffelRes.ok && Array.isArray(json?.data)) {
         duffelItems = json.data.map(mapDuffel).filter((x: any) => x?.label);
       } else {
-        // Log the error payload to help debugging
-        console.warn("[/api/places] Duffel error:", text?.slice(0, 500));
+        console.warn("[/api/places] Duffel error body:", raw?.slice(0, 400));
       }
     } catch (e: any) {
       console.error("[/api/places] Duffel fetch failed:", e?.message || String(e));
     }
   }
 
-  // If Duffel produced results, return them
   if (duffelItems.length > 0) {
     return NextResponse.json({ ok: true, source: "duffel", data: duffelItems }, { status: 200 });
   }
 
-  // Fallback to Teleport cities to avoid "No matches"
-  const teleItems = await fallbackTeleport(q);
-  console.log("[/api/places] Teleport count=%d", teleItems.length);
+  // Fallback to Teleport so typing always yields suggestions
+  const tele = await fallbackTeleport(q);
+  console.log("[/api/places] Teleport count=%d", tele.length);
 
   return NextResponse.json(
-    { ok: true, source: teleItems.length ? "teleport" : "empty", data: teleItems },
+    { ok: true, source: tele.length ? "teleport" : "empty", data: tele },
     { status: 200 }
   );
 }
