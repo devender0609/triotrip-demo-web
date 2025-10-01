@@ -1,63 +1,110 @@
 // app/api/places/route.ts
 import { NextResponse } from "next/server";
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-type DuffelPlace = {
-  type: string;
-  name: string;
-  city_name?: string;
-  iata_code?: string;
-  iata_city_code?: string;
-  id?: string;
-};
+// Server-only env: make sure this is set in Vercel project settings
+const DUFFEL_KEY = process.env.DUFFEL_API_KEY || process.env.DUFFEL_TOKEN || "";
 
-function toSuggestion(p: DuffelPlace) {
-  const code = p.iata_code || p.iata_city_code || "";
-  const name = p.name || "";
-  const city = p.city_name || "";
+// Map Duffel suggestion to our shape
+function mapDuffel(p: any) {
+  const code = p?.iata_code || p?.iata_code_v1 || p?.iata || null;
+  const city = p?.city?.name || p?.city_name || p?.city || "";
+  const country = p?.country_name || p?.country || p?.country?.name || "";
+  const name = p?.name || p?.airport_name || p?.full_name || "";
+  const parts = [code, name, city, country].filter(Boolean);
   return {
-    code,
-    name,
-    city,
-    label: code ? `${code} — ${name}${city ? ` (${city})` : ""}` : `${name}${city ? ` (${city})` : ""}`,
+    code: code || undefined,
+    name: name || city || "",
+    city: city || undefined,
+    country: country || undefined,
+    label: parts.length ? parts.join(" — ") : (code || name || city || "Unknown"),
   };
 }
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const q = (searchParams.get("q") || "").trim();
-  if (!q || q.length < 2) return NextResponse.json({ data: [] });
-
-  const key = process.env.DUFFEL_KEY;
-  const version = process.env.DUFFEL_VERSION || "beta";
-
-  if (!key) {
-    return NextResponse.json({ data: [] }, { status: 200 });
-  }
-
-  const url = `https://api.duffel.com/places/suggestions?name=${encodeURIComponent(q)}&types[]=airport&types[]=city&limit=15`;
-
+// Fallback: Teleport city search -> top few cities
+async function fallbackTeleport(q: string) {
   try {
-    const r = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Duffel-Version": version,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
-
-    if (!r.ok) {
-      const msg = await r.text();
-      return NextResponse.json({ error: msg || `Duffel error ${r.status}` }, { status: r.status });
-    }
-
+    const u = `https://api.teleport.org/api/cities/?search=${encodeURIComponent(q)}&limit=5`;
+    const r = await fetch(u, { cache: "no-store" });
     const j = await r.json();
-    const list = Array.isArray(j?.data) ? j.data.map(toSuggestion) : [];
-    return NextResponse.json({ data: list }, { status: 200 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "fetch failed", data: [] }, { status: 200 });
+    const items = (j?._embedded?.["city:search-results"] || []).map((it: any) => {
+      const name: string = it?.matching_full_name || it?.matching_alternate_names?.[0]?.name || "";
+      return {
+        code: undefined,
+        name,
+        city: name,
+        country: undefined,
+        label: name,
+      };
+    });
+    return items;
+  } catch {
+    return [];
   }
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const q = (url.searchParams.get("q") || "").trim();
+
+  if (!q) {
+    return NextResponse.json({ ok: true, data: [] }, { status: 200 });
+  }
+
+  // Debug banner in logs
+  console.log("[/api/places] q=%s, duffelKey? %s", q, DUFFEL_KEY ? "yes" : "no");
+
+  // Try Duffel first, if we have a key
+  let duffelItems: any[] = [];
+  if (DUFFEL_KEY) {
+    try {
+      const duffelUrl =
+        `https://api.duffel.com/air/places/suggestions?` +
+        `name=${encodeURIComponent(q)}&types[]=airport&types[]=city&limit=8`;
+
+      const duffelRes = await fetch(duffelUrl, {
+        headers: {
+          Authorization: `Bearer ${DUFFEL_KEY}`,
+          "Duffel-Version": "v2",          // IMPORTANT: v2, not "beta"
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const text = await duffelRes.text();
+      let json: any = {};
+      try { json = text ? JSON.parse(text) : {}; } catch {}
+
+      console.log("[/api/places] Duffel status=%d ok=%s count=%s",
+        duffelRes.status, String(duffelRes.ok),
+        Array.isArray(json?.data) ? json.data.length : "n/a"
+      );
+
+      if (duffelRes.ok && Array.isArray(json?.data)) {
+        duffelItems = json.data.map(mapDuffel).filter((x: any) => x?.label);
+      } else {
+        // Log the error payload to help debugging
+        console.warn("[/api/places] Duffel error:", text?.slice(0, 500));
+      }
+    } catch (e: any) {
+      console.error("[/api/places] Duffel fetch failed:", e?.message || String(e));
+    }
+  }
+
+  // If Duffel produced results, return them
+  if (duffelItems.length > 0) {
+    return NextResponse.json({ ok: true, source: "duffel", data: duffelItems }, { status: 200 });
+  }
+
+  // Fallback to Teleport cities to avoid "No matches"
+  const teleItems = await fallbackTeleport(q);
+  console.log("[/api/places] Teleport count=%d", teleItems.length);
+
+  return NextResponse.json(
+    { ok: true, source: teleItems.length ? "teleport" : "empty", data: teleItems },
+    { status: 200 }
+  );
 }
