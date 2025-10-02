@@ -1,166 +1,258 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 
-type Place = { code: string; name: string; city?: string; country?: string; label: string };
-
-type LegacyProps = {
-  label: string;
-  code: string;                               // IATA code, e.g., "BOS"
-  initialDisplay: string;                     // visible text like "BOS — Logan …"
-  onTextChange: (v: string) => void;          // called on each keystroke
-  onChangeCode: (code: string, display: string) => void; // called when user picks an option
-  autoFocus?: boolean;
-  id?: string;
+type Place = {
+  code: string;        // IATA
+  name: string;        // Airport/City name
+  city?: string;
+  country?: string;
+  label: string;       // "BOS — Logan … — US"
 };
 
-type SimpleProps = {
-  id: string;
-  label: string;
-  value?: string;                             // optional visible text
-  onChange: (nextCode: string) => void;       // called when user picks an option
-  autoFocus?: boolean;
-};
-
-type Props = LegacyProps | SimpleProps;
-
-function isLegacy(p: Props): p is LegacyProps {
-  return (p as LegacyProps).onChangeCode !== undefined;
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(" ");
 }
 
-export default function AirportField(props: Props) {
-  const label = props.label;
-  const autoFocus = props.autoFocus;
+async function fetchPlaces(q: string, signal?: AbortSignal): Promise<Place[]> {
+  const url = `/api/places?q=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { signal, cache: "no-store" });
+  if (!res.ok) return [];
+  const j = await res.json();
+  const arr: any[] = Array.isArray(j?.data) ? j.data : [];
+  return arr.map((p) => ({
+    code: String(p.code || "").toUpperCase(),
+    name: p.name || p.city || "",
+    city: p.city || "",
+    country: p.country || "",
+    label: p.label || `${p.code} — ${p.name}`,
+  }));
+}
 
-  // Determine initial visible text
-  const initialTerm = isLegacy(props)
-    ? (props.initialDisplay || props.code || "")
-    : (props.value || "");
+export default function AirportField(props: {
+  id: string;
+  label: string;
+  /** current IATA code from parent */
+  code: string;
+  /** initial text the user sees (e.g. label for selected code) */
+  initialDisplay: string;
+  /** live typing back up to parent (used by your page state) */
+  onTextChange: (next: string) => void;
+  /** commit a selection (code + pretty display) */
+  onChangeCode: (code: string, display: string) => void;
+  autoFocus?: boolean;
+}) {
+  const {
+    id,
+    label,
+    code,
+    initialDisplay,
+    onTextChange,
+    onChangeCode,
+    autoFocus,
+  } = props;
 
-  const [term, setTerm] = useState(initialTerm);
+  /** What the user is typing in the box */
+  const [input, setInput] = useState(initialDisplay || "");
+  /** Results list */
+  const [items, setItems] = useState<Place[]>([]);
+  /** UI state */
   const [open, setOpen] = useState(false);
-  const [options, setOptions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
-  const lastIssued = useRef(0);
+  const [activeIdx, setActiveIdx] = useState<number>(-1);
 
-  // Keep input text in sync with upstream changes (either prop style)
+  const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSelectedRef = useRef<string>(""); // last committed display string
+
+  // Sync when parent changes the selected code/display (e.g. on swap/clear)
   useEffect(() => {
-    if (isLegacy(props)) {
-      setTerm(props.initialDisplay || props.code || "");
-    } else {
-      setTerm(props.value || "");
+    if (initialDisplay !== lastSelectedRef.current) {
+      setInput(initialDisplay || "");
+      onTextChange(initialDisplay || "");
+      lastSelectedRef.current = initialDisplay || "";
     }
-  }, [isLegacy(props) ? props.initialDisplay : (props as SimpleProps).value,
-      isLegacy(props) ? props.code : undefined]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDisplay, code]);
 
-  // For legacy usage: bubble keystrokes back up
+  // Debounced search while typing (only if user is actually typing; not after a commit)
   useEffect(() => {
-    if (isLegacy(props) && props.onTextChange) {
-      props.onTextChange(term);
-    }
-  }, [term, props]);
+    onTextChange(input);
 
-  // Debounced search to same-origin /api/places
-  useEffect(() => {
-    const t = term.trim();
-    if (t.length < 2) {
-      setOptions([]);
+    const q = input.trim();
+
+    // If the box contains exactly the last committed display → don’t search
+    if (q && q === lastSelectedRef.current) {
+      setItems([]);
       setOpen(false);
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
-    const id = ++lastIssued.current;
-    const handle = setTimeout(async () => {
-      try {
-        const url = `/api/places?q=${encodeURIComponent(t)}`;
-        console.log("[AirportField] /api/places -> %s", url);
-
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const j = await res.json();
-        const items: Place[] = Array.isArray(j?.data) ? j.data : [];
-
-        if (id === lastIssued.current) {
-          setOptions(items);
-          setOpen(true);
-          console.log("[AirportField] results:", { count: items.length, sample: items.slice(0, 1) });
-        }
-      } catch (e) {
-        if (id === lastIssued.current) {
-          setOptions([]);
-          setOpen(true);
-        }
-      } finally {
-        if (id === lastIssued.current) setLoading(false);
-      }
-    }, 200);
-
-    return () => clearTimeout(handle);
-  }, [term]);
-
-  const hasOptions = options.length > 0;
-
-  const onPick = (p: Place) => {
-    const display = p.label;
-    // Legacy: inform parent of both code + display
-    if (isLegacy(props)) {
-      props.onChangeCode?.(p.code, display);
-    } else {
-      // Simple: send chosen code only
-      (props as SimpleProps).onChange?.(p.code);
+    // If less than 2 chars, hide suggestions
+    if (q.length < 2) {
+      if (abortRef.current) abortRef.current.abort();
+      setItems([]);
+      setOpen(!!q); // small UX: open only when user started typing
+      setLoading(false);
+      return;
     }
-    setTerm(display);
-    setOpen(false);
-  };
 
-  const placeholder = useMemo(
-    () => (label ? label : "Type city or airport"),
-    [label]
-  );
+    if (debRef.current) clearTimeout(debRef.current);
+    debRef.current = setTimeout(async () => {
+      // cancel previous
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setLoading(true);
+      try {
+        const data = await fetchPlaces(q, ctrl.signal);
+        setItems(data.slice(0, 20));
+        setOpen(true);
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      if (debRef.current) {
+        clearTimeout(debRef.current);
+        debRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input]);
+
+  // Close on outside click
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!boxRef.current) return;
+      if (!boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setActiveIdx(-1);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function commitSelection(p: Place) {
+    const display = `${p.code} — ${p.name}${p.city && p.city !== p.name ? ` — ${p.city}` : ""}${p.country ? ` — ${p.country}` : ""}`;
+    lastSelectedRef.current = display;
+    setInput(display);
+    setItems([]);
+    setOpen(false);
+    setActiveIdx(-1);
+    onTextChange(display);
+    onChangeCode(p.code, display);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setOpen(true);
+      return;
+    }
+    if (!open) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, Math.max(0, items.length - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      if (activeIdx >= 0 && activeIdx < items.length) {
+        e.preventDefault();
+        commitSelection(items[activeIdx]);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setActiveIdx(-1);
+    }
+  }
+
+  function clearField() {
+    lastSelectedRef.current = "";
+    setInput("");
+    onTextChange("");
+    onChangeCode("", "");
+    setItems([]);
+    setOpen(false);
+    setActiveIdx(-1);
+    inputRef.current?.focus();
+  }
 
   return (
-    <div className="relative w-full">
-      <input
-        id={("id" in props && props.id) ? props.id : undefined}
-        className="w-full h-11 px-4 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-[15px]"
-        placeholder={placeholder}
-        value={term}
-        onChange={(e) => setTerm(e.target.value)}
-        onFocus={() => term.trim().length >= 2 && setOpen(true)}
-        autoFocus={autoFocus}
-        autoComplete="off"
-      />
+    <div className="w-full" ref={boxRef}>
+      <label htmlFor={id} className="form-label mb-1">{label || " "}</label>
 
-      {open && (
-        <div
-          className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg"
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {loading && (
-            <div className="px-4 py-3 text-sm text-gray-500">Searching…</div>
-          )}
+      <div className="position-relative">
+        <input
+          id={id}
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onFocus={() => setOpen(items.length > 0)}
+          onKeyDown={onKeyDown}
+          autoComplete="off"
+          placeholder="Type city or airport"
+          className="form-control"
+          style={{ paddingRight: 34 }}
+          {...(autoFocus ? { autoFocus: true } : {})}
+        />
 
-          {!loading && hasOptions && (
-            <ul className="divide-y divide-gray-100">
-              {options.map((p) => (
-                <li
-                  key={`${p.code}-${p.label}`}
-                  className="px-4 py-3 cursor-pointer hover:bg-gray-50"
-                  onClick={() => onPick(p)}
+        {/* Clear button */}
+        {input && (
+          <button
+            type="button"
+            aria-label="Clear"
+            onClick={clearField}
+            className="btn btn-light border position-absolute"
+            style={{ right: 4, top: 4, height: 30, width: 30, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        )}
+
+        {/* Popover */}
+        {open && (
+          <div
+            className="border rounded shadow bg-white mt-1"
+            style={{ position: "absolute", zIndex: 40, left: 0, right: 0, maxHeight: 280, overflowY: "auto" }}
+            role="listbox"
+            aria-label="Airport suggestions"
+          >
+            {loading && (
+              <div className="px-3 py-2 text-muted small">Searching…</div>
+            )}
+            {!loading && items.length === 0 && (
+              <div className="px-3 py-2 text-muted small">No matches</div>
+            )}
+            {!loading &&
+              items.map((p, idx) => (
+                <div
+                  key={p.code + idx}
+                  role="option"
+                  aria-selected={idx === activeIdx}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => commitSelection(p)}
+                  className={classNames(
+                    "px-3 py-2 cursor-pointer",
+                    idx === activeIdx ? "bg-primary text-white" : "bg-white text-dark",
+                    "border-top"
+                  )}
                 >
-                  <div className="font-medium">{p.label}</div>
-                </li>
+                  <div className="fw-semibold">{p.label}</div>
+                </div>
               ))}
-            </ul>
-          )}
-
-          {!loading && !hasOptions && (
-            <div className="px-4 py-3 text-sm text-gray-500">No matches</div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
