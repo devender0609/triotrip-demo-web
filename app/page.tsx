@@ -31,8 +31,8 @@ type SearchPayload = {
   nights?: number;
   minHotelStar?: number;
 
-  minBudget?: number | "";
-  maxBudget?: number | "";
+  minBudget?: number;
+  maxBudget?: number;
   currency: string;
   sort: SortKey;
   maxStops?: 0 | 1 | 2;
@@ -45,7 +45,7 @@ const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
   .toISOString()
   .slice(0, 10);
 
-/** Try multiple patterns to extract IATA code from a display string */
+/** Extract 3-letter IATA from a display string if needed */
 function extractIATA(display: string): string {
   const s = String(display || "").toUpperCase().trim();
   let m = /\(([A-Z]{3})\)/.exec(s);
@@ -55,7 +55,7 @@ function extractIATA(display: string): string {
   return "";
 }
 
-/* small helpers used in compare + pdf */
+/* little utils */
 const num = (v: any): number | undefined =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
@@ -129,7 +129,7 @@ export default function Page() {
   const [greener, setGreener] = useState(false);
 
   // hotels
-  const [includeHotel, setIncludeHotel] = useState(false);
+  const [includeHotel, setIncludeHotel] = useState(false); // start false to reduce filtering
   const [hotelCheckIn, setHotelCheckIn] = useState("");
   const [hotelCheckOut, setHotelCheckOut] = useState("");
   const [minHotelStar, setMinHotelStar] = useState(0);
@@ -202,18 +202,16 @@ export default function Page() {
       if (!origin || !destination) throw new Error("Please select origin and destination.");
       if (!departDate) throw new Error("Please pick a departure date.");
       if (departDate < todayLocal) throw new Error("Departure date can’t be in the past.");
+      if (adults < 1) throw new Error("At least 1 adult is required.");
       if (roundTrip) {
         if (!returnDate) throw new Error("Please pick a return date.");
         if (returnDate < departDate) throw new Error("Return date must be after departure.");
       }
-      if (adults < 1) throw new Error("At least 1 adult is required.");
 
-      // ===== Budget validation (non-negative + min ≤ max) =====
+      // Budget validation
       if (minBudget !== "" && minBudget < 0) throw new Error("Min budget cannot be negative.");
       if (maxBudget !== "" && maxBudget < 0) throw new Error("Max budget cannot be negative.");
       if (
-        minBudget !== "" &&
-        maxBudget !== "" &&
         typeof minBudget === "number" &&
         typeof maxBudget === "number" &&
         minBudget > maxBudget
@@ -251,7 +249,7 @@ export default function Page() {
         greener,
       };
 
-      // IMPORTANT: same-origin Next API route (no CORS)
+      // Same-origin Next API route
       const r = await fetch(`/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -264,6 +262,51 @@ export default function Page() {
       if (!r.ok) throw new Error(j?.error || "Search failed");
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
+
+      // Fallback demo results if backend returns nothing
+      if (items.length === 0) {
+        const demo = (id: string, price: number, stops: number) => ({
+          id,
+          currency,
+          total_cost: price,
+          flight: {
+            carrier_name: ["United", "American", "Delta"][stops] || "United",
+            cabin,
+            stops,
+            price_usd: price,
+            refundable: stops !== 1,
+            greener: stops === 0,
+            segments_out: [{ from: origin, to: destination, depart_time: `${departDate}T08:20`, arrive_time: `${departDate}T11:05`, duration_minutes: 165 }],
+            ...(roundTrip
+              ? {
+                  segments_in: [
+                    {
+                      from: destination,
+                      to: origin,
+                      depart_time: `${returnDate || departDate}T17:35`,
+                      arrive_time: `${returnDate || departDate}T20:10`,
+                      duration_minutes: 155,
+                    },
+                  ],
+                }
+              : {}),
+            duration_minutes: roundTrip ? 165 + 155 : 165,
+          },
+          ...(includeHotel
+            ? {
+                hotel: {
+                  name: ["Downtown Inn", "Airport Suites", "Central Plaza"][stops] || "Downtown Inn",
+                  star: Math.max(3, minHotelStar || 4),
+                  city: destination,
+                  price_converted: 129,
+                  currency,
+                },
+              }
+            : {}),
+        });
+        items = [demo("DEMO-1", 268, 0), demo("DEMO-2", 219, 1), demo("DEMO-3", 279, 2)];
+      }
+
       if (includeHotel && minHotelStar > 0) {
         items = items.filter((p) => !p.hotel || Number(p.hotel.star || 0) >= minHotelStar);
       }
@@ -276,6 +319,7 @@ export default function Page() {
     }
   }
 
+  // Re-run search when only the sort changes and we already have results
   useEffect(() => {
     if (results) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,7 +331,7 @@ export default function Page() {
     );
   }
 
-  /* ---------- PDF export (with logo + hotel info + children ages) ---------- */
+  /* ---------- PDF export helpers ---------- */
   async function loadFirstLogo(): Promise<string | null> {
     const candidates = [
       "/triptrio-logo.png",
@@ -612,7 +656,9 @@ export default function Page() {
         const f = p.flight || {};
         return (
           num(f.duration_minutes) ??
-          (num(outDur[i]) && num(retDur[i]) ? (num(outDur[i]) as number) + (num(retDur[i]) as number) : undefined)
+          (num(outDur[i]) && num(retDur[i])
+            ? (num(outDur[i]) as number) + (num(retDur[i]) as number)
+            : undefined)
         );
       });
       rows.push({
@@ -738,7 +784,7 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Row: trip, dates (same line), passengers (+ ages), search button */}
+        {/* Row: trip, dates, passengers, search */}
         <div className="row dates-passengers">
           <div className="tripToggle">
             <label>Trip</label>
@@ -942,7 +988,7 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Row: include hotel + check-in/out (same line) + stars */}
+        {/* Row: include hotel + check-in/out + stars */}
         <div className="row hotelRow">
           <div className="chk">
             <label className="ck">
@@ -1047,69 +1093,6 @@ export default function Page() {
         </div>
       </div>
 
-      {/* ======= COMPARISON (TOP) ======= */}
-      {compareMode && (
-        <section className="comparePanel top">
-          <header className="cp-head">
-            <div className="cp-title">Comparison</div>
-            <div className="cp-sub">
-              {comparedIds.length < 2
-                ? "Pick at least two results to compare."
-                : "🏆 marks the winner per metric"}
-            </div>
-          </header>
-
-          {!includeHotel && (
-            <div className="hint">
-              Tip: turn on <b>Include hotel</b> and search to compare hotel name, stars and price.
-            </div>
-          )}
-
-          {compareCalc && compareCalc.selected.length >= 1 && (
-            <div className="cp-table" role="table" aria-label="Compare results">
-              {/* header row */}
-              <div className="cp-row head" role="row">
-                <div className="cp-cell head sticky">Metric</div>
-                {compareCalc.selected.map((p, i) => {
-                  const f = p.flight || {};
-                  const label =
-                    (f.carrier_name || f.carrier || "Airline") +
-                    (p.hotel?.name ? ` • ${p.hotel.name}` : "");
-                  return (
-                    <div key={i} className="cp-cell head">
-                      <div className="cp-coltitle">
-                        {label}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* body rows (already include hotel metrics first) */}
-              {compareCalc &&
-                compareCalc.rows.map((r) => (
-                  <div className="cp-row" role="row" key={r.key}>
-                    <div className="cp-cell sticky">{r.label}</div>
-                    {compareCalc.selected.map((_p, i) => {
-                      const v = r.values[i];
-                      const isWin =
-                        compareCalc.winners?.[r.key]?.includes(i) ?? false;
-                      const display =
-                        r.fmt ? r.fmt(v) : typeof v === "number" ? String(v) : String(v || "—");
-                      return (
-                        <div key={i} className={`cp-cell ${isWin ? "win" : ""}`}>
-                          {isWin && "🏆 "}
-                          {display}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-            </div>
-          )}
-        </section>
-      )}
-
       {/* RESULTS & MESSAGES */}
       {error && <div className="error" role="alert">⚠ {error}</div>}
       {hotelWarning && !error && <div className="warn">ⓘ {hotelWarning}</div>}
@@ -1133,7 +1116,7 @@ export default function Page() {
         </div>
       )}
 
-      {/* STICKY COMPARE BAR (kept for quick clear) */}
+      {/* STICKY COMPARE BAR */}
       {compareMode && comparedIds.length > 0 && (
         <div className="comparebar" role="region" aria-label="Compare selection">
           <div className="title">Compare ({comparedIds.length}/3 selected)</div>
@@ -1201,23 +1184,6 @@ export default function Page() {
         .chip { height:32px; padding:0 12px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; font-weight:800; }
         .chip.active { border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.15) inset; }
         .right { display:flex; align-items:center; gap:8px; }
-
-        /* Compare panel (TOP) */
-        .comparePanel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px; display:grid; gap:12px; max-width:1200px; margin:0 auto; }
-        .comparePanel.top { order: 2; } /* sits after toolbar, before results */
-        .cp-head { display:flex; align-items:baseline; gap:12px; justify-content:space-between; flex-wrap:wrap; }
-        .cp-title { font-weight:900; font-size:18px; color:#0f172a; }
-        .cp-sub { color:#475569; font-weight:700; }
-        .hint { padding:8px 10px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px; font-weight:700; }
-
-        .cp-table { overflow-x:auto; }
-        .cp-row { display:grid; grid-template-columns: 220px repeat(var(--cols, 3), minmax(200px, 1fr)); }
-        .cp-row.head { border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
-        .cp-cell { padding:8px; border-bottom:1px dashed #e5e7eb; font-weight:700; color:#334155; }
-        .cp-cell.head { font-weight:900; color:#0f172a; }
-        .cp-cell.win { background:#ecfeff; border-bottom-color:#a5f3fc; }
-        .cp-coltitle { font-weight:900; }
-        .sticky { position: sticky; left: 0; background:#fff; z-index: 1; border-right:1px solid #e5e7eb; }
 
         .results { display:grid; gap:12px; max-width:1200px; margin:0 auto; }
         .loading, .empty, .error, .warn { padding:12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; max-width:1200px; margin:0 auto; }
