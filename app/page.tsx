@@ -29,7 +29,7 @@ interface SearchPayload {
   minBudget?: number;
   maxBudget?: number;
   currency: string;
-  sort: SortKey;
+  sort: SortKey;               // server can ignore (client-side sort)
   maxStops?: 0 | 1 | 2;
   refundable?: boolean;
   greener?: boolean;
@@ -37,7 +37,10 @@ interface SearchPayload {
 }
 
 /* ---------- helpers ---------- */
-const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+  .toISOString()
+  .slice(0, 10);
+
 const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 function extractIATA(display: string): string {
@@ -227,7 +230,7 @@ export default function Page() {
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
 
-      // Dev/demo fallback: 12 options so "All" visibly differs from "Top-3"
+      // Dev/demo fallback: **12 options** so "All" visibly differs from "Top-3"
       if (items.length === 0) {
         const mk = (id: string, price: number, stops: number) => ({
           id,
@@ -265,6 +268,20 @@ export default function Page() {
                 }
               : {}),
           },
+          // demo hotels (so you always see ~3 per star tier)
+          hotels: includeHotel
+            ? [
+                { name: "Grand Plaza", stars: 5, price: price * 0.9, link: "https://example.com/h1" },
+                { name: "City Luxe", stars: 5, price: price * 0.88, link: "https://example.com/h2" },
+                { name: "Royal Suites", stars: 5, price: price * 0.86, link: "https://example.com/h3" },
+                { name: "Metro Inn", stars: 4, price: price * 0.75, link: "https://example.com/h4" },
+                { name: "Garden Stay", stars: 4, price: price * 0.7, link: "https://example.com/h5" },
+                { name: "Harbor View", stars: 4, price: price * 0.68, link: "https://example.com/h6" },
+                { name: "Comfort Hub", stars: 3, price: price * 0.55, link: "https://example.com/h7" },
+                { name: "Central Lodge", stars: 3, price: price * 0.53, link: "https://example.com/h8" },
+                { name: "Airport Inn", stars: 3, price: price * 0.5, link: "https://example.com/h9" },
+              ]
+            : undefined,
         });
         items = [
           mk("DEMO-1", 268, 0), mk("DEMO-2", 219, 1), mk("DEMO-3", 279, 2),
@@ -328,7 +345,7 @@ export default function Page() {
     return items;
   }, [results, sort, sortBasis]);
 
-  // Top-3 vs All
+  // Top-3 vs All (NO slicing when showAll)
   const shownResults = useMemo(() => {
     if (!sortedResults) return null;
     return showAll ? sortedResults : sortedResults.slice(0, 3);
@@ -373,8 +390,6 @@ export default function Page() {
     chip: { height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 } as React.CSSProperties,
     chipActive: { borderColor: "#0ea5e9", boxShadow: "0 0 0 2px rgba(14,165,233,.15) inset" } as React.CSSProperties,
 
-    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 18, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
-
     msg: { padding: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, maxWidth: 1240, margin: "0 auto" } as React.CSSProperties,
     error: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 800 } as React.CSSProperties,
     warn: { borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 700 } as React.CSSProperties,
@@ -382,20 +397,21 @@ export default function Page() {
     comparePanel: {
       background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 12, maxWidth: 1240, margin: "0 auto", display: "grid", gap: 10,
     } as React.CSSProperties,
-    compareTable: {
-      width: "100%", borderCollapse: "separate", borderSpacing: 0,
-    } as React.CSSProperties,
-    thtd: {
-      borderBottom: "1px solid #e2e8f0", padding: "8px 10px", textAlign: "left",
-    } as React.CSSProperties,
+    compareTable: { width: "100%", borderCollapse: "separate", borderSpacing: 0 } as React.CSSProperties,
+    thtd: { borderBottom: "1px solid #e2e8f0", padding: "8px 10px", textAlign: "left" } as React.CSSProperties,
+
+    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 18, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
   };
 
   const globalCSS = `
     a.logo, .site-logo, a[href*="logo"], img.logo, img[alt*="TripTrio"] { text-decoration: none!important; border-bottom: 0!important; }
   `;
 
+  // passengers total for downstream components
+  const passengersTotal = adults + children + infants;
+
   return (
-    <div style={s.wrap}>
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <style>{globalCSS}</style>
 
       {/* HERO */}
@@ -586,8 +602,57 @@ export default function Page() {
         </div>
       </form>
 
+      {/* COMPARE PANEL — now ABOVE the results */}
+      {compareMode && comparedPkgs.length >= 2 && (
+        <section style={s.comparePanel} aria-live="polite">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontWeight: 900, color: "#0f172a" }}>Compare ({comparedPkgs.length} of 3)</div>
+            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.compareTable}>
+              <thead>
+                <tr>
+                  <th style={s.thtd}>Airline</th>
+                  <th style={s.thtd}>Stops</th>
+                  <th style={s.thtd}>Outbound duration</th>
+                  <th style={s.thtd}>Refundable</th>
+                  <th style={s.thtd}>Greener</th>
+                  <th style={s.thtd}>Price (basis)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparedPkgs.map((p) => {
+                  const airline = p.flight?.carrier_name || p.flight?.carrier || "Airline";
+                  const stops = typeof p.flight?.stops === "number" ? p.flight.stops : Math.max(0, (p.flight?.segments_out?.length || 1) - 1);
+                  const outDur = durationFromSegs(segsFromFlight(p.flight, "out"));
+                  const price =
+                    sortBasis === "bundle"
+                      ? (num(p.total_cost) ?? (num(p.flight_total) ?? 0) + (num(p.hotel_total) ?? 0))
+                      : (num(p.flight_total) ??
+                         num(p.total_cost_flight) ??
+                         num(p.flight?.price_usd_converted) ??
+                         num(p.flight?.price_usd) ??
+                         num(p.total_cost) ?? 0);
+                  return (
+                    <tr key={p.id}>
+                      <td style={s.thtd}>{airline}</td>
+                      <td style={s.thtd}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</td>
+                      <td style={s.thtd}>{outDur ? `${Math.floor(outDur/60)}h ${outDur%60}m` : "—"}</td>
+                      <td style={s.thtd}>{p.flight?.refundable ? "Yes" : "No"}</td>
+                      <td style={s.thtd}>{p.flight?.greener ? "Yes" : "—"}</td>
+                      <td style={s.thtd}>{Math.round(Number(price))} {p.currency || "USD"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* TOOLBAR */}
-      <div style={toolbarStyle}>
+      <div style={s.toolbar}>
         <div style={s.chips} role="tablist" aria-label="Sort">
           {(["best", "cheapest", "fastest", "flexible"] as const).map((k) => (
             <button key={k} role="tab" aria-selected={sort === k}
@@ -629,70 +694,13 @@ export default function Page() {
               pkg={pkg}
               index={i}
               currency={currency}
+              pax={passengersTotal}              {/* <<< pass pax to card */}
               comparedIds={compareMode ? comparedIds : undefined}
               onToggleCompare={compareMode ? toggleCompare : undefined}
               onSavedChangeGlobal={(count) => setSavedCount(count)}
             />
           ))}
         </div>
-      )}
-
-      {/* COMPARE PANEL */}
-      {compareMode && comparedPkgs.length >= 2 && (
-        <section style={s.comparePanel} aria-live="polite">
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontWeight: 900, color: "#0f172a" }}>Compare ({comparedPkgs.length} of 3)</div>
-            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={s.compareTable}>
-              <thead>
-                <tr>
-                  <th style={s.thtd}>Airline</th>
-                  <th style={s.thtd}>Stops</th>
-                  <th style={s.thtd}>Outbound duration</th>
-                  <th style={s.thtd}>Price (basis)</th>
-                  <th style={s.thtd}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparedPkgs.map((p) => {
-                  const airline = p.flight?.carrier_name || p.flight?.carrier || "Airline";
-                  const stops = typeof p.flight?.stops === "number" ? p.flight.stops : Math.max(0, (p.flight?.segments_out?.length || 1) - 1);
-                  const outDur = durationFromSegs(segsFromFlight(p.flight, "out"));
-                  const price =
-                    sortBasis === "bundle"
-                      ? (num(p.total_cost) ?? (num(p.flight_total) ?? 0) + (num(p.hotel_total) ?? 0))
-                      : (num(p.flight_total) ??
-                         num(p.total_cost_flight) ??
-                         num(p.flight?.price_usd_converted) ??
-                         num(p.flight?.price_usd) ??
-                         num(p.total_cost) ?? 0);
-                  return (
-                    <tr key={p.id}>
-                      <td style={s.thtd}>{airline}</td>
-                      <td style={s.thtd}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</td>
-                      <td style={s.thtd}>{outDur ? `${Math.floor(outDur/60)}h ${outDur%60}m` : "—"}</td>
-                      <td style={s.thtd}>{Math.round(price)} {p.currency || "USD"}</td>
-                      <td style={s.thtd}>
-                        <button
-                          onClick={() => {
-                            // scroll to card
-                            const el = document.querySelector(`[data-offer-id="${p.id}"]`);
-                            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                          }}
-                          style={{ ...s.chip }}
-                        >
-                          View card
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
     </div>
   );
@@ -704,4 +712,3 @@ function segStyle(active: boolean): React.CSSProperties {
   return active ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" } : segBase;
 }
 const primaryBtn: React.CSSProperties = { height: 42, padding: "0 16px", border: "none", fontWeight: 900, color: "#fff", background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 120 };
-const toolbarStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 8, gap: 8, flexWrap: "wrap", maxWidth: 1240, margin: "0 auto" };

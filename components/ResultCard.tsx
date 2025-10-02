@@ -1,484 +1,243 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
-type ResultCardProps = {
+type Props = {
   pkg: any;
-  index: number;
+  index?: number;
   currency: string;
+  pax?: number;                              // <<< new: to pass to booking
   comparedIds?: string[];
   onToggleCompare?: (id: string) => void;
   onSavedChangeGlobal?: (count: number) => void;
 };
 
-function minutesToText(m?: number) {
-  if (typeof m !== "number") return "—";
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  return `${h}h ${min}m`;
-}
-
-function segsFromFlight(f: any, which: "out" | "ret"): any[] {
-  if (!f) return [];
-  if (which === "out") {
-    return (
-      f?.outbound ||
-      f?.segments_out ||
-      f?.legs?.[0]?.segments ||
-      f?.itineraries?.[0]?.segments ||
-      f?.segments ||
-      []
-    );
-  } else {
-    return (
-      f?.inbound ||
-      f?.segments_in ||
-      f?.legs?.[1]?.segments ||
-      f?.itineraries?.[1]?.segments ||
-      []
-    );
-  }
-}
-
-function layoverMinutes(prevArrive: string, nextDepart: string) {
-  const a = +new Date(prevArrive);
-  const d = +new Date(nextDepart);
-  if (!a || !d) return undefined;
-  return Math.max(0, Math.round((d - a) / 60000));
-}
-
-function fmtCurrency(n?: number, ccy = "USD") {
-  if (typeof n !== "number") return "—";
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: ccy }).format(
-      Math.round(n)
-    );
-  } catch {
-    return `${ccy} ${Math.round(n)}`;
-  }
-}
-
-/** localStorage helpers for “Save” */
-const SAVED_KEY = "triptrio:saved";
-function readSaved(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(SAVED_KEY) || "[]") || [];
-  } catch {
-    return [];
-  }
-}
-function writeSaved(ids: string[]) {
-  localStorage.setItem(SAVED_KEY, JSON.stringify(ids));
-}
-
-/** airline url helper (basic map + fallback search) */
-function airlineHomepage(name?: string): string | null {
-  if (!name) return null;
-  const key = name.toLowerCase();
-  const map: Record<string, string> = {
-    "american": "https://www.aa.com",
-    "american airlines": "https://www.aa.com",
-    "delta": "https://www.delta.com",
-    "united": "https://www.united.com",
-    "alaska": "https://www.alaskaair.com",
-    "jetblue": "https://www.jetblue.com",
-    "spirit": "https://www.spirit.com",
-    "frontier": "https://www.flyfrontier.com",
-    "southwest": "https://www.southwest.com",
-    "air canada": "https://www.aircanada.com",
-    "lufthansa": "https://www.lufthansa.com",
-    "british airways": "https://www.britishairways.com",
-    "air france": "https://wwws.airfrance.us",
-    "klm": "https://www.klm.com",
-    "emirates": "https://www.emirates.com",
-    "qatar": "https://www.qatarairways.com",
-    "qatar airways": "https://www.qatarairways.com",
-    "singapore airlines": "https://www.singaporeair.com",
-    "turkish airlines": "https://www.turkishairlines.com",
-  };
-  for (const k of Object.keys(map)) {
-    if (key.includes(k)) return map[k];
-  }
-  // fallback: a generic search (still airline-first)
-  return `https://www.google.com/search?q=${encodeURIComponent(name + " official site booking")}`;
-}
-
 export default function ResultCard({
   pkg,
-  index,
+  index = 0,
   currency,
+  pax = 1,
   comparedIds,
   onToggleCompare,
   onSavedChangeGlobal,
-}: ResultCardProps) {
-  const id = pkg?.id || `f-${index}`;
-  const f = pkg?.flight || {};
-  const airline = f?.carrier_name || f?.carrier || "Airline";
-  const stops =
-    typeof f?.stops === "number"
-      ? f.stops
-      : (() => {
-          const segs = segsFromFlight(f, "out");
-          return segs.length ? segs.length - 1 : 0;
-        })();
-
+}: Props) {
+  const id = pkg.id || `r-${index}`;
+  const airline = pkg.flight?.carrier_name || pkg.flight?.carrier || "Airline";
   const price =
-    pkg?.total_cost ??
-    pkg?.total_cost_converted ??
-    f?.price_usd_converted ??
-    f?.price_usd ??
+    pkg.total_cost ??
+    pkg.flight_total ??
+    pkg.total_cost_flight ??
+    pkg.flight?.price_usd_converted ??
+    pkg.flight?.price_usd ??
     0;
 
-  /* save */
-  const [isSaved, setIsSaved] = useState(false);
-  useEffect(() => {
-    const saved = readSaved();
-    setIsSaved(saved.includes(id));
-  }, [id]);
+  const stops = typeof pkg.flight?.stops === "number"
+    ? pkg.flight.stops
+    : Math.max(0, (pkg.flight?.segments_out?.length || 1) - 1);
 
-  function toggleSave() {
-    const saved = readSaved();
-    const next = saved.includes(id) ? saved.filter((x) => x !== id) : [...saved, id];
-    writeSaved(next);
-    setIsSaved(next.includes(id));
-    onSavedChangeGlobal?.(next.length);
-    window.dispatchEvent(new Event("triptrio:saved:changed"));
-  }
+  const outSegs = pkg.flight?.segments_out || [];
+  const inSegs = pkg.flight?.segments_in || [];
 
-  /* compare */
-  const compared = comparedIds?.includes(id);
-
-  /* deeplinks */
-  function openGoogleFlights() {
-    const o = encodeURIComponent(f?.segments_out?.[0]?.from || pkg?.origin || "");
-    const d = encodeURIComponent(f?.segments_out?.[0]?.to || pkg?.destination || "");
-    const dd = encodeURIComponent(f?.segments_out?.[0]?.depart_time?.slice(0, 10) || "");
-    const rd = encodeURIComponent(f?.segments_in?.[0]?.depart_time?.slice(0, 10) || "");
-    const rt = rd ? `${o}.${d}.${dd}*${d}.${o}.${rd}` : `${o}.${d}.${dd}`;
-    window.open(`https://www.google.com/travel/flights?q=${rt}`, "_blank", "noopener");
-  }
-
-  function openSkyscanner() {
-    const o = (f?.segments_out?.[0]?.from || pkg?.origin || "").toUpperCase();
-    const d = (f?.segments_out?.[0]?.to || pkg?.destination || "").toUpperCase();
-    const dd = (f?.segments_out?.[0]?.depart_time || "").slice(0, 10).replaceAll("-", "");
-    const rd = (f?.segments_in?.[0]?.depart_time || "").slice(0, 10).replaceAll("-", "");
-    const route = rd ? `${o}/${d}/${dd}/${rd}` : `${o}/${d}/${dd}`;
-    window.open(`https://www.skyscanner.com/transport/flights/${route}/`, "_blank", "noopener");
-  }
-
-  function openAirline() {
-    const url = airlineHomepage(airline);
-    if (url) window.open(url, "_blank", "noopener");
-  }
-
+  // ---- Book via TripTrio (ensures pax is passed) ----
   async function bookViaTripTrio() {
-    // Use GET with query params to avoid POST edge issues in some hosts
     try {
-      const params = new URLSearchParams({
-        airline: airline,
-        origin: f?.segments_out?.[0]?.from || pkg?.origin || "",
-        destination: f?.segments_out?.slice(-1)?.[0]?.to || pkg?.destination || "",
-        currency: pkg?.currency || currency || "USD",
-        pax: String(pkg?.passengers ?? 1),
-        price: String(price || 0),
+      const res = await fetch("/api/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offer: {
+            currency: pkg.currency || currency,
+            total_cost: price,
+            flight: {
+              carrier_name: airline,
+              origin: outSegs?.[0]?.from || pkg.origin,
+              destination: outSegs?.[outSegs.length - 1]?.to || pkg.destination,
+              price_usd: price,
+            },
+            pax,                                  // <<< ensure pax is propagated
+          },
+        }),
       });
-      const res = await fetch(`/api/book?${params.toString()}`, { method: "GET", cache: "no-store" });
       const j = await res.json();
-      if (!res.ok || !j?.ok || !j?.bookingUrl) {
-        throw new Error(j?.error || "Could not start booking");
-      }
-      window.open(j.bookingUrl, "_blank", "noopener");
+      if (!res.ok || !j?.bookingUrl) throw new Error(j?.error || "Failed to create booking");
+      // append pax in case your checkout reads it from URL
+      const url = new URL(j.bookingUrl);
+      url.searchParams.set("pax", String(pax));
+      window.location.href = url.toString();
     } catch (e: any) {
       alert(e?.message || "Booking failed");
     }
   }
 
-  const outSegs = useMemo(() => segsFromFlight(f, "out"), [f]);
-  const inSegs = useMemo(() => segsFromFlight(f, "ret"), [f]);
+  // ---- Google Flights / Skyscanner deeplinks ----
+  const route = `${outSegs?.[0]?.from || pkg.origin}-${outSegs?.[outSegs.length - 1]?.to || pkg.destination}`;
+  const dateOut = (outSegs?.[0]?.depart_time || "").slice(0, 10);
+  const dateRet = (inSegs?.[0]?.depart_time || "").slice(0, 10);
+  const gf =
+    `https://www.google.com/travel/flights?q=Flights%20to%20${encodeURIComponent(route)}%20on%20${encodeURIComponent(dateOut)}` +
+    (dateRet ? `%20return%20${encodeURIComponent(dateRet)}` : "");
+  const sky =
+    `https://www.skyscanner.com/transport/flights/${encodeURIComponent(route.replace("-", "/"))}/${dateOut}` +
+    (dateRet ? `/${dateRet}` : "") + `/?adults=${pax}`;
 
-  /* styles — single-row, broad card */
-  const card: React.CSSProperties = {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 16,
-    padding: 16,
-    display: "grid",
-    gap: 14,
-    boxShadow:
-      "0 1px 0 rgba(2,6,23,.04), 0 10px 24px -12px rgba(2,6,23,.18), inset 0 -1px 0 rgba(2,6,23,.02)",
-  };
-  const headerRow: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 14,
-    flexWrap: "wrap",
-  };
-  const sectionTitle: React.CSSProperties = { fontWeight: 900, color: "#334155", marginTop: 2 };
-  const box: React.CSSProperties = {
-    border: "1px solid #f1f5f9",
-    background: "#f8fafc",
-    borderRadius: 12,
-    padding: 12,
-  };
-  const twoCol: React.CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "1fr 340px",
-    gap: 12,
-  };
-  const tag: React.CSSProperties = {
-    padding: "4px 8px",
-    borderRadius: 999,
-    border: "1px solid #e2e8f0",
-    background: "#f8fafc",
-    fontWeight: 800,
-    fontSize: 12,
-    color: "#0f172a",
-  };
-  const tagGood: React.CSSProperties = {
-    ...tag,
-    background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
-    color: "#fff",
-    border: "none",
-  };
-  const tagRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
-  const btnRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
-  const btn: React.CSSProperties = {
-    height: 38,
-    padding: "0 12px",
-    borderRadius: 12,
-    border: "1px solid #e2e8f0",
-    background: "#fff",
-    fontWeight: 800,
-  };
-  const btnPrimary: React.CSSProperties = {
-    ...btn,
-    background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
-    border: "none",
-    color: "#fff",
-  };
-  const saveBtn: React.CSSProperties = {
-    ...btn,
-    border: isSaved ? "2px solid #0ea5e9" : "1px solid #e2e8f0",
-    background: isSaved ? "rgba(14,165,233,.08)" : "#fff",
-  };
-  const priceBox: React.CSSProperties = { fontWeight: 900, fontSize: 22, color: "#0f172a" };
-  const gridSegments: React.CSSProperties = { display: "grid", gap: 10 };
-  const seg: React.CSSProperties = {
-    display: "grid",
-    gap: 6,
-    gridTemplateColumns: "1fr auto",
-    padding: "8px 10px",
-    borderRadius: 12,
-    border: "1px solid #e2e8f0",
-    background: "#fff",
-  };
-  const layover: React.CSSProperties = {
-    textAlign: "center",
-    fontWeight: 800,
-    color: "#64748b",
-  };
+  // ---- Save (requires login) ----
+  const [saving, setSaving] = useState(false);
+  function requireLoginThenSave() {
+    const user = localStorage.getItem("triptrio:user");
+    if (!user) {
+      if (confirm("Please sign in to save this option. Go to login page now?")) {
+        window.location.href = "/login";
+      }
+      return;
+    }
+    try {
+      setSaving(true);
+      const saved = JSON.parse(localStorage.getItem("triptrio:saved") || "[]");
+      const next = Array.isArray(saved) ? saved : [];
+      if (!next.find((x: any) => x?.id === id)) next.push({ id, airline, price });
+      localStorage.setItem("triptrio:saved", JSON.stringify(next));
+      window.dispatchEvent(new Event("triptrio:saved:changed"));
+      onSavedChangeGlobal?.(next.length);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const isCompared = comparedIds?.includes(id);
+
+  // ---- Hotels (show up to 3 per star tier) ----
+  const hotels: any[] = Array.isArray(pkg.hotels) ? pkg.hotels : [];
+  const groupedHotels = useMemo(() => {
+    const map = new Map<number, any[]>();
+    hotels.forEach((h) => {
+      const s = Number(h.stars) || 0;
+      if (!map.has(s)) map.set(s, []);
+      map.get(s)!.push(h);
+    });
+    // keep only top 3 per tier
+    for (const [k, arr] of map.entries()) map.set(k, arr.slice(0, 3));
+    // sort tiers: 5★ to 3★
+    return [...map.entries()].sort((a, b) => b[0] - a[0]);
+  }, [hotels]);
 
   return (
-    <div style={card}>
-      {/* HEADER */}
-      <div style={headerRow}>
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>{airline}</div>
-          <div style={tagRow}>
-            <span style={tag}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
-            {f?.cabin && <span style={tag}>{f.cabin}</span>}
-            {f?.refundable ? <span style={tagGood}>Refundable</span> : null}
-            {f?.greener ? <span style={tagGood}>Greener</span> : null}
-          </div>
+    <article
+      data-offer-id={id}
+      style={{
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 16,
+        padding: 12,
+        display: "grid",
+        gap: 10,
+      }}
+    >
+      <header style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <strong style={{ fontSize: 16 }}>{airline}</strong>
+          <span style={{ opacity: 0.6 }}>•</span>
+          <span>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
         </div>
-        <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
-          <div style={priceBox}>{fmtCurrency(price, pkg?.currency || currency)}</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {onToggleCompare && (
-            <label style={{ fontWeight: 800, color: "#334155", display: "flex", alignItems: "center", gap: 6 }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 800, color: "#334155" }}>
               <input
                 type="checkbox"
-                checked={!!compared}
+                checked={!!isCompared}
                 onChange={() => onToggleCompare(id)}
               />
               Compare
             </label>
           )}
+          <button onClick={requireLoginThenSave} disabled={saving}
+            style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </header>
+
+      {/* Flight summary */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 900, fontSize: 18 }}>
+          {Math.round(Number(price))} {pkg.currency || currency}
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a href={gf} target="_blank" rel="noreferrer"
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>Google Flights</a>
+          <a href={sky} target="_blank" rel="noreferrer"
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>Skyscanner</a>
+          <button onClick={bookViaTripTrio}
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "none", color: "#fff", fontWeight: 900,
+                      background: "linear-gradient(90deg,#06b6d4,#0ea5e9)" }}>
+            Book via TripTrio
+          </button>
         </div>
       </div>
 
-      {/* CONTENT: two columns – left flight/hotel details; right booking sections */}
-      <div style={twoCol}>
-        {/* LEFT: FLIGHT + HOTEL DETAILS */}
-        <div style={{ display: "grid", gap: 12 }}>
-          {/* FLIGHT SECTION */}
-          <div style={box}>
-            <div style={sectionTitle}>Flight</div>
-            <div style={{ height: 8 }} />
-            {/* Outbound */}
-            {outSegs?.length > 0 && (
-              <div style={gridSegments} aria-label="Outbound">
-                <div style={{ fontWeight: 800, color: "#334155" }}>Outbound</div>
-                {outSegs.map((s: any, i: number) => {
-                  const from = s?.from || s?.departure?.iataCode || "—";
-                  const to = s?.to || s?.arrival?.iataCode || "—";
-                  const dt = s?.depart_time || s?.departure?.at || "";
-                  const at = s?.arrive_time || s?.arrival?.at || "";
-                  const dur = minutesToText(s?.duration_minutes);
-                  const prev = outSegs[i - 1];
-                  const lay =
-                    i > 0
-                      ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
-                      : undefined;
+      {/* Layovers display */}
+      {Array.isArray(outSegs) && outSegs.length > 0 && (
+        <div style={{ fontSize: 13, color: "#334155" }}>
+          <b>Outbound:</b>{" "}
+          {outSegs.map((s: any, i: number) => {
+            const segText = `${s.from} → ${s.to}`;
+            const layover =
+              i < outSegs.length - 1
+                ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m`
+                : "";
+            return (
+              <span key={i}>
+                {segText}
+                {layover}
+                {i < outSegs.length - 1 ? " | " : ""}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {Array.isArray(inSegs) && inSegs.length > 0 && (
+        <div style={{ fontSize: 13, color: "#334155" }}>
+          <b>Return:</b>{" "}
+          {inSegs.map((s: any, i: number) => {
+            const segText = `${s.from} → ${s.to}`;
+            const layover =
+              i < inSegs.length - 1
+                ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m`
+                : "";
+            return (
+              <span key={i}>
+                {segText}
+                {layover}
+                {i < inSegs.length - 1 ? " | " : ""}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
-                  return (
-                    <React.Fragment key={`out-${i}`}>
-                      {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
-                      <div style={seg}>
-                        <div>
-                          <div style={{ fontWeight: 800 }}>
-                            {from} → {to}
-                          </div>
-                          <div style={{ color: "#64748b", fontWeight: 700 }}>
-                            {String(dt).slice(0, 16).replace("T", " ")} →{" "}
-                            {String(at).slice(0, 16).replace("T", " ")}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+      {/* Hotels block (if present) */}
+      {groupedHotels.length > 0 && (
+        <section style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8, display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 900, color: "#0f172a" }}>Hotels (top 3 per star)</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {groupedHotels.map(([stars, arr]) => (
+              <div key={String(stars)}>
+                <div style={{ fontWeight: 800, color: "#334155", marginBottom: 6 }}>{stars}★</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                  {(arr as any[]).map((h, i) => (
+                    <a key={i} href={h.link || "#"} target="_blank" rel="noreferrer"
+                       style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 8, textDecoration: "none", color: "#0f172a" }}>
+                      <div style={{ fontWeight: 800 }}>{h.name}</div>
+                      <div style={{ color: "#475569", fontSize: 12 }}>
+                        {Math.round(h.price || 0)} {pkg.currency || "USD"}
                       </div>
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            )}
-            {/* Return */}
-            {inSegs?.length > 0 && (
-              <>
-                <div style={{ height: 10 }} />
-                <div style={gridSegments} aria-label="Return">
-                  <div style={{ fontWeight: 800, color: "#334155" }}>Return</div>
-                  {inSegs.map((s: any, i: number) => {
-                    const from = s?.from || s?.departure?.iataCode || "—";
-                    const to = s?.to || s?.arrival?.iataCode || "—";
-                    const dt = s?.depart_time || s?.departure?.at || "";
-                    const at = s?.arrive_time || s?.arrival?.at || "";
-                    const dur = minutesToText(s?.duration_minutes);
-                    const prev = inSegs[i - 1];
-                    const lay =
-                      i > 0
-                        ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
-                        : undefined;
-
-                    return (
-                      <React.Fragment key={`ret-${i}`}>
-                        {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
-                        <div style={seg}>
-                          <div>
-                            <div style={{ fontWeight: 800 }}>
-                              {from} → {to}
-                            </div>
-                            <div style={{ color: "#64748b", fontWeight: 700 }}>
-                              {String(dt).slice(0, 16).replace("T", " ")} →{" "}
-                              {String(at).slice(0, 16).replace("T", " ")}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
+                    </a>
+                  ))}
                 </div>
-              </>
-            )}
+              </div>
+            ))}
           </div>
-
-          {/* HOTEL SECTION (if present) */}
-          {pkg?.hotel && (
-            <div style={box}>
-              <div style={sectionTitle}>Hotel</div>
-              <div style={{ height: 8 }} />
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>
-                  {pkg.hotel.name} {pkg.hotel.star ? `(${Math.round(pkg.hotel.star)}★)` : ""}
-                </div>
-                <div style={{ fontWeight: 900 }}>
-                  {fmtCurrency(
-                    pkg.hotel.price_converted ?? pkg.hotel.total_usd,
-                    pkg.hotel.currency || pkg.currency || "USD"
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT: BOOKING BOXES (flight vs hotel kept separate) */}
-        <div style={{ display: "grid", gap: 12 }}>
-          {/* FLIGHT BOOKING */}
-          <div style={box}>
-            <div style={sectionTitle}>Book Flight</div>
-            <div style={{ height: 8 }} />
-            <div style={btnRow}>
-              <button style={btnPrimary} type="button" onClick={bookViaTripTrio}>
-                Book via TripTrio
-              </button>
-              <button style={btn} type="button" onClick={openAirline}>
-                Airline site
-              </button>
-              <button style={btn} type="button" onClick={openGoogleFlights}>
-                Google Flights
-              </button>
-              <button style={btn} type="button" onClick={openSkyscanner}>
-                Skyscanner
-              </button>
-              <button
-                style={saveBtn}
-                onClick={toggleSave}
-                type="button"
-                title={isSaved ? "Remove from saved" : "Save this option"}
-              >
-                {isSaved ? "Saved ✓" : "Save"}
-              </button>
-            </div>
-          </div>
-
-          {/* HOTEL BOOKING (only if a hotel exists) */}
-          {pkg?.hotel && (
-            <div style={box}>
-              <div style={sectionTitle}>Book Hotel</div>
-              <div style={{ height: 8 }} />
-              <div style={btnRow}>
-                {pkg.hotel.deeplinks?.booking && (
-                  <a style={btn} href={pkg.hotel.deeplinks.booking} target="_blank" rel="noopener">
-                    Booking.com
-                  </a>
-                )}
-                {pkg.hotel.deeplinks?.hotels && (
-                  <a style={btn} href={pkg.hotel.deeplinks.hotels} target="_blank" rel="noopener">
-                    Hotels.com
-                  </a>
-                )}
-                {pkg.hotel.deeplinks?.expedia && (
-                  <a style={btn} href={pkg.hotel.deeplinks.expedia} target="_blank" rel="noopener">
-                    Expedia
-                  </a>
-                )}
-                {!pkg.hotel.deeplinks && <span style={{ fontWeight: 700, color: "#64748b" }}>No hotel links</span>}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+        </section>
+      )}
+    </article>
   );
 }
