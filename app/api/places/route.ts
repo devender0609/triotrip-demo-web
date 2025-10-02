@@ -12,7 +12,7 @@ function normalize(items: any[]): Place[] {
       const code = p.iata_code ?? p.code ?? "";
       const name = p.name ?? "";
       const city = p.city_name ?? p.city ?? "";
-      const country = p.country_code ?? p.country ?? "";
+      const country = p.iata_country_code ?? p.country_code ?? p.country ?? "";
       if (!code || !name) return null;
       return {
         code,
@@ -49,17 +49,18 @@ export async function GET(req: Request) {
   }
 
   try {
-    // **v2** endpoint + **query** param
-    const url = new URL("https://api.duffel.com/air/places/suggestions");
+    // ✅ Duffel v2 endpoint (NO /air), uses ?query=
+    const url = new URL("https://api.duffel.com/places/suggestions");
     url.searchParams.set("query", q);
-    url.searchParams.append("types[]", "airport");
-    url.searchParams.append("types[]", "city");
-    url.searchParams.set("limit", "12");
+    // (Optional) You can still filter by type if you want, but it’s not required:
+    // url.searchParams.append("types[]", "airport");
+    // url.searchParams.append("types[]", "city");
+    // url.searchParams.set("limit", "12");
 
     const res = await fetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${DUFFEL_KEY}`,
-        "Duffel-Version": "v2", // <– FORCE v2
+        "Duffel-Version": "v2",
         Accept: "application/json",
       },
       cache: "no-store",
@@ -76,7 +77,7 @@ export async function GET(req: Request) {
           error: body,
           data: [],
         },
-        { status: 200 },
+        { status: 200 }
       );
     }
 
