@@ -39,7 +39,6 @@ type SearchPayload = {
   refundable?: boolean;
   greener?: boolean;
 
-  // optional – backend supports sorting by flight-only vs bundle
   sortBasis?: "flightOnly" | "bundle";
 };
 
@@ -48,7 +47,6 @@ const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
   .toISOString()
   .slice(0, 10);
 
-/** Extract 3-letter IATA from a display string if needed */
 function extractIATA(display: string): string {
   const s = String(display || "").toUpperCase().trim();
   let m = /\(([A-Z]{3})\)/.exec(s);
@@ -58,7 +56,6 @@ function extractIATA(display: string): string {
   return "";
 }
 
-/* little utils */
 const num = (v: any): number | undefined =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
@@ -107,7 +104,6 @@ export default function Page() {
   // origin / destination
   const [originCode, setOriginCode] = useState("");
   const [originDisplay, setOriginDisplay] = useState("");
-
   const [destCode, setDestCode] = useState("");
   const [destDisplay, setDestDisplay] = useState("");
 
@@ -120,7 +116,7 @@ export default function Page() {
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [infants, setInfants] = useState(0);
-  const [childrenAges, setChildrenAges] = useState<number[]>([]); // 2–17
+  const [childrenAges, setChildrenAges] = useState<number[]>([]);
 
   // cabin / filters
   const [cabin, setCabin] = useState<Cabin>("ECONOMY");
@@ -132,7 +128,7 @@ export default function Page() {
   const [greener, setGreener] = useState(false);
 
   // hotels
-  const [includeHotel, setIncludeHotel] = useState(false); // start false to reduce filtering
+  const [includeHotel, setIncludeHotel] = useState(false);
   const [hotelCheckIn, setHotelCheckIn] = useState("");
   const [hotelCheckOut, setHotelCheckOut] = useState("");
   const [minHotelStar, setMinHotelStar] = useState(0);
@@ -152,16 +148,14 @@ export default function Page() {
 
   const passengersTotal = adults + children + infants;
 
-  // keep childrenAges length in sync with children count
   useEffect(() => {
     setChildrenAges((prev) => {
       const next = prev.slice(0, children);
-      while (next.length < children) next.push(8); // default
+      while (next.length < children) next.push(8);
       return next;
     });
   }, [children]);
 
-  // hotel nights
   const hotelNights = useMemo(() => {
     if (!hotelCheckIn || !hotelCheckOut) return undefined;
     const inMs = +new Date(hotelCheckIn);
@@ -212,7 +206,6 @@ export default function Page() {
         if (returnDate < departDate) throw new Error("Return date must be after departure.");
       }
 
-      // Budget validation
       if (minBudget !== "" && minBudget < 0) throw new Error("Min budget cannot be negative.");
       if (maxBudget !== "" && maxBudget < 0) throw new Error("Max budget cannot be negative.");
       if (
@@ -252,10 +245,9 @@ export default function Page() {
         refundable,
         greener,
 
-        sortBasis, // NEW: tell backend which basis to sort by
+        sortBasis,
       };
 
-      // Same-origin Next API route
       const r = await fetch(`/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -269,13 +261,12 @@ export default function Page() {
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
 
-      // Fallback demo results if backend returns nothing
       if (items.length === 0) {
         const demo = (id: string, price: number, stops: number) => ({
           id,
           currency,
           total_cost: price,
-          flight_total: price, // for display
+          flight_total: price,
           hotel_total: 0,
           flight: {
             carrier_name: ["United", "American", "Delta"][stops] || "United",
@@ -305,7 +296,7 @@ export default function Page() {
       }
 
       if (includeHotel && minHotelStar > 0) {
-        // soft behavior is handled in API; just show what's returned
+        // API already applies soft behavior
       }
       setHotelWarning(j?.hotelWarning || null);
       setResults(items);
@@ -316,7 +307,6 @@ export default function Page() {
     }
   }
 
-  // Re-run search when only the sort or sortBasis changes and we already have results
   useEffect(() => {
     if (results) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -553,20 +543,20 @@ export default function Page() {
 
     if (selected.length > 0) {
       rows.push({
-        key: "hotel",
+        key: "Hotel",
         label: "Hotel",
         values: selected.map((p) => p.hotel?.name || "—"),
         better: null,
       });
       rows.push({
-        key: "hotelStar",
+        key: "HotelStars",
         label: "Hotel stars",
         values: selected.map((p) => num(p.hotel?.star)),
         better: "max",
         fmt: (v) => (typeof v === "number" ? `${v}★` : "—"),
       });
       rows.push({
-        key: "hotelPrice",
+        key: "HotelPrice",
         label: "Hotel price",
         values: selected.map((p) => {
           const h = p.hotel || {};
@@ -586,7 +576,7 @@ export default function Page() {
         );
       });
       rows.push({
-        key: "total",
+        key: "Total",
         label: "Total price",
         values: totals,
         better: "min",
@@ -598,7 +588,7 @@ export default function Page() {
         return num(f.price_usd_converted) ?? num(f.price_usd) ?? undefined;
       });
       rows.push({
-        key: "flightPrice",
+        key: "FlightPrice",
         label: "Flight price",
         values: fprices,
         better: "min",
@@ -611,7 +601,7 @@ export default function Page() {
         const out = segsFromFlight(f, "out");
         return out.length ? out.length - 1 : undefined;
       });
-      rows.push({ key: "stops", label: "Stops", values: stops, better: "min" });
+      rows.push({ key: "Stops", label: "Stops", values: stops, better: "min" });
 
       const outDur = selected.map((p) => {
         const f = p.flight || {};
@@ -624,7 +614,7 @@ export default function Page() {
         );
       });
       rows.push({
-        key: "outDur",
+        key: "OutDur",
         label: "Outbound duration",
         values: outDur,
         better: "min",
@@ -642,7 +632,7 @@ export default function Page() {
         );
       });
       rows.push({
-        key: "retDur",
+        key: "RetDur",
         label: "Return duration",
         values: retDur,
         better: "min",
@@ -659,7 +649,7 @@ export default function Page() {
         );
       });
       rows.push({
-        key: "overallDur",
+        key: "OverallDur",
         label: "Total duration",
         values: overallDur,
         better: "min",
@@ -667,21 +657,21 @@ export default function Page() {
       });
 
       rows.push({
-        key: "cabin",
+        key: "Cabin",
         label: "Cabin",
         values: selected.map((p) => p.flight?.cabin || "—"),
         better: null,
       });
 
       rows.push({
-        key: "airline",
+        key: "Airline",
         label: "Airline",
         values: selected.map((p) => p.flight?.carrier_name || p.flight?.carrier || "—"),
         better: null,
       });
 
       rows.push({
-        key: "refundable",
+        key: "Refundable",
         label: "Refundable",
         values: selected.map((p) => (p.flight?.refundable ? 1 : 0)),
         better: "max",
@@ -689,7 +679,7 @@ export default function Page() {
       });
 
       rows.push({
-        key: "greener",
+        key: "Greener",
         label: "Greener option",
         values: selected.map((p) => (p.flight?.greener ? 1 : 0)),
         better: "max",
@@ -1115,12 +1105,20 @@ export default function Page() {
         </div>
       </div>
 
-      {/* ===================== B) COMPARE TABLE (FULL BLOCK) ===================== */}
+      {/* ===================== COMPARE TABLE (no dynamic styled-jsx) ===================== */}
       {compareMode && compareCalc && compareCalc.selected.length >= 2 && (
         <div className="panel" role="region" aria-label="Comparison table">
           <div style={{ fontWeight: 900, marginBottom: 8 }}>Comparison</div>
           <div className="cmp">
-            <div className="cmp-row cmp-head">
+            {/* Head row with inline gridTemplateColumns */}
+            <div
+              className="cmp-row cmp-head"
+              style={{
+                display: "grid",
+                gap: "6px",
+                gridTemplateColumns: `220px repeat(${compareCalc.selected.length}, 1fr)`,
+              }}
+            >
               <div className="cmp-cell"></div>
               {compareCalc.selected.map((p, i) => (
                 <div key={i} className="cmp-cell cmp-headcell">
@@ -1130,7 +1128,15 @@ export default function Page() {
             </div>
 
             {compareCalc.rows.map((r) => (
-              <div key={r.key} className="cmp-row">
+              <div
+                key={r.key}
+                className="cmp-row"
+                style={{
+                  display: "grid",
+                  gap: "6px",
+                  gridTemplateColumns: `220px repeat(${compareCalc.selected.length}, 1fr)`,
+                }}
+              >
                 <div className="cmp-cell cmp-key">{r.label}</div>
                 {r.values.map((v, i) => {
                   const winners = compareCalc.winners[r.key] || [];
@@ -1147,20 +1153,16 @@ export default function Page() {
           </div>
 
           <style jsx>{`
-            .cmp { display:grid; gap:6px; }
-            .cmp-row { display:grid; grid-template-columns: 220px repeat(${compareCalc.selected.length}, 1fr); gap:6px; }
+            .cmp { display:grid; gap:6px; overflow-x:auto; } /* enable horizontal scroll on small screens */
             .cmp-head .cmp-cell { font-weight:900; }
             .cmp-key { font-weight:900; color:#334155; }
             .cmp-cell { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px; font-weight:800; color:#0f172a; }
             .cmp-headcell { text-align:center; }
             .win { border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.12) inset; }
-            @media (max-width: 820px) {
-              .cmp-row { grid-template-columns: 160px repeat(${compareCalc.selected.length}, 1fr); }
-            }
           `}</style>
         </div>
       )}
-      {/* ======================================================================= */}
+      {/* ====================================================================== */}
 
       {/* RESULTS & MESSAGES */}
       {error && <div className="error" role="alert">⚠ {error}</div>}
@@ -1185,7 +1187,6 @@ export default function Page() {
         </div>
       )}
 
-      {/* STICKY COMPARE BAR */}
       {compareMode && comparedIds.length > 0 && (
         <div className="comparebar" role="region" aria-label="Compare selection">
           <div className="title">Compare ({comparedIds.length}/3 selected)</div>
@@ -1208,7 +1209,6 @@ export default function Page() {
         .hero-badge { padding: 6px 12px; border-radius: 999px; background: linear-gradient(90deg,#06b6d4,#0ea5e9); color: #fff; font-weight: 900; }
         .dot { opacity: .6; }
 
-        /* WIDER containers (1400px) */
         .panel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:14px; display:grid; gap:12px;
                  max-width: 1400px; margin: 0 auto; }
 
@@ -1268,7 +1268,6 @@ export default function Page() {
         .comparebar .ids { opacity:.9; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .comparebar .btn { height:32px; padding:0 10px; border-radius:10px; background:#fff; color:#0ea5e9; border:none; font-weight:900; }
 
-        /* --- Responsive --- */
         @media (max-width: 1120px) {
           .row.dates-passengers { grid-template-columns: 160px 1fr 1fr minmax(300px, 1fr); }
           .searchBtnCell { grid-column: 1 / -1; justify-content: flex-end; }
