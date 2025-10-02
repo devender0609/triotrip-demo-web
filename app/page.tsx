@@ -37,10 +37,7 @@ interface SearchPayload {
 }
 
 /* ---------- helpers ---------- */
-const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-  .toISOString()
-  .slice(0, 10);
-
+const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 function extractIATA(display: string): string {
@@ -61,21 +58,6 @@ function durationFromSegs(segs: any[]): number | undefined {
   if (!Array.isArray(segs) || segs.length === 0) return undefined;
   const sum = segs.reduce((t, s) => t + (Number(s?.duration_minutes) || 0), 0);
   return Number.isFinite(sum) ? sum : undefined;
-}
-
-/* demo hotel generator (3 per 5★/4★/3★) */
-function demoHotels(base: number, currency: string) {
-  return [
-    { name: "Grand Plaza", stars: 5, price: base * 0.9, link: "https://example.com/h1", currency },
-    { name: "City Luxe", stars: 5, price: base * 0.88, link: "https://example.com/h2", currency },
-    { name: "Royal Suites", stars: 5, price: base * 0.86, link: "https://example.com/h3", currency },
-    { name: "Metro Inn", stars: 4, price: base * 0.75, link: "https://example.com/h4", currency },
-    { name: "Garden Stay", stars: 4, price: base * 0.7, link: "https://example.com/h5", currency },
-    { name: "Harbor View", stars: 4, price: base * 0.68, link: "https://example.com/h6", currency },
-    { name: "Comfort Hub", stars: 3, price: base * 0.55, link: "https://example.com/h7", currency },
-    { name: "Central Lodge", stars: 3, price: base * 0.53, link: "https://example.com/h8", currency },
-    { name: "Airport Inn", stars: 3, price: base * 0.5, link: "https://example.com/h9", currency },
-  ];
 }
 
 /* ---------- page ---------- */
@@ -245,36 +227,12 @@ export default function Page() {
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
 
-      // ---------- DEV FALLBACKS ----------
-      // A) If backend returns some results but <=3, expand to 10 for "All"
-      if (items.length > 0 && items.length <= 3) {
-        const base = items.slice();
-        let k = 0;
-        while (items.length < 10) {
-          const src = base[k % base.length];
-          const price = Math.max(120, Math.round((src.total_cost ?? src.flight_total ?? 250) * (0.9 + (k % 6) * 0.03)));
-          const stops = Math.min(2, (src.flight?.stops ?? 0) + (k % 3));
-          items.push({
-            ...src,
-            id: `${src.id || "PKG"}-X${k + 1}`,
-            total_cost: price,
-            flight_total: price,
-            flight: {
-              ...(src.flight || {}),
-              stops,
-              price_usd: price,
-            },
-          });
-          k++;
-        }
-      }
-
-      // B) If there are NO results, fabricate 12 demo options
+      // Dev/demo fallback: 12 options so "All" visibly differs from "Top-3"
       if (items.length === 0) {
         const mk = (id: string, price: number, stops: number) => ({
           id,
           currency,
-          total_cost: price,
+          total_cost: price, // bundle == flight in demo
           flight_total: price,
           hotel_total: 0,
           flight: {
@@ -316,15 +274,6 @@ export default function Page() {
         ];
       }
 
-      // C) Ensure hotels appear if Include Hotel is ON (attach fallbacks when missing)
-      if (includeHotel) {
-        items = items.map((p) => {
-          if (Array.isArray(p.hotels) && p.hotels.length > 0) return p;
-          const base = num(p.total_cost) ?? num(p.flight_total) ?? num(p.flight?.price_usd) ?? 300;
-          return { ...p, hotels: demoHotels(base!, p.currency || currency) };
-        });
-      }
-
       setHotelWarning(j?.hotelWarning || null);
       setResults(items);
       setComparedIds([]); // reset compare on fresh search
@@ -359,7 +308,7 @@ export default function Page() {
     const basisValue = (p: any) => (sortBasis === "bundle" ? bundleTotal(p) : flightPrice(p));
 
     if (sort === "cheapest") {
-      items.sort((a, b) => basisValue(a)! - basisValue(b)!);
+      items.sort((a, b) => (basisValue(a)! - basisValue(b)!));
     } else if (sort === "fastest") {
       items.sort((a, b) => outDur(a)! - outDur(b)!);
     } else if (sort === "flexible") {
@@ -370,7 +319,6 @@ export default function Page() {
         return basisValue(a)! - basisValue(b)!;
       });
     } else {
-      // best
       items.sort((a, b) => {
         const p = basisValue(a)! - basisValue(b)!;
         if (p !== 0) return p;
@@ -397,64 +345,65 @@ export default function Page() {
     [results, comparedIds]
   );
 
-  /* ---------- styles (larger fonts) ---------- */
+  /* ---------- styles ---------- */
   const s = {
+    wrap: { padding: 16, display: "grid", gap: 16 } as React.CSSProperties,
     panel: {
       background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16,
-      padding: 16, display: "grid", gap: 14, maxWidth: 1240, margin: "0 auto",
-      fontSize: 15,
+      padding: 14, display: "grid", gap: 12, maxWidth: 1240, margin: "0 auto",
     } as React.CSSProperties,
-    label: { fontWeight: 900, color: "#334155", display: "block", marginBottom: 6, fontSize: 14 } as React.CSSProperties,
-    input: { height: 46, padding: "0 12px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%", background: "#fff", fontSize: 15 } as React.CSSProperties,
+    label: { fontWeight: 800, color: "#334155", display: "block", marginBottom: 6 } as React.CSSProperties,
+    input: { height: 42, padding: "0 10px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%", background: "#fff" } as React.CSSProperties,
     row: { display: "grid", gap: 12, alignItems: "end" } as React.CSSProperties,
     two: { gridTemplateColumns: "1fr 54px 1fr" } as React.CSSProperties,
-    datesPassengers: { gridTemplateColumns: "170px 1fr 1fr minmax(320px, 480px) 140px" } as React.CSSProperties,
+    datesPassengers: { gridTemplateColumns: "170px 1fr 1fr minmax(320px, 440px) 130px" } as React.CSSProperties,
     four: { gridTemplateColumns: "1fr 1fr 1fr 1fr" } as React.CSSProperties,
     three: { gridTemplateColumns: "1fr 1fr 1fr" } as React.CSSProperties,
-    paxGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(100px, 1fr))", gap: 10, alignItems: "center" } as React.CSSProperties,
-    paxLbl: { display: "block", fontSize: 12, color: "#475569", marginBottom: 6, fontWeight: 800 } as React.CSSProperties,
+    paxGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(90px, 1fr))", gap: 8, alignItems: "center" } as React.CSSProperties,
+    paxLbl: { display: "block", fontSize: 12, color: "#475569", marginBottom: 4, fontWeight: 800 } as React.CSSProperties,
     swapcell: { display: "flex", alignItems: "flex-end", justifyContent: "center" } as React.CSSProperties,
-    swap: { height: 46, width: 46, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 18 } as React.CSSProperties,
+    swap: { height: 42, width: 42, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 18 } as React.CSSProperties,
 
     toolbar: {
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 10, gap: 10, flexWrap: "wrap",
-      maxWidth: 1240, margin: "0 auto", fontSize: 15,
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 8, gap: 8, flexWrap: "wrap",
+      maxWidth: 1240, margin: "0 auto",
     } as React.CSSProperties,
-    chips: { display: "flex", gap: 10, flexWrap: "wrap" } as React.CSSProperties,
-    chip: { height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 14 } as React.CSSProperties,
+    chips: { display: "flex", gap: 8, flexWrap: "wrap" } as React.CSSProperties,
+    chip: { height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 } as React.CSSProperties,
     chipActive: { borderColor: "#0ea5e9", boxShadow: "0 0 0 2px rgba(14,165,233,.15) inset" } as React.CSSProperties,
 
-    msg: { padding: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, maxWidth: 1240, margin: "0 auto", fontSize: 15 } as React.CSSProperties,
-    error: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 900 } as React.CSSProperties,
-    warn: { borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 800 } as React.CSSProperties,
+    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 18, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
+
+    msg: { padding: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, maxWidth: 1240, margin: "0 auto" } as React.CSSProperties,
+    error: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 800 } as React.CSSProperties,
+    warn: { borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 700 } as React.CSSProperties,
 
     comparePanel: {
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, maxWidth: 1240, margin: "0 auto", display: "grid", gap: 12, fontSize: 15,
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 12, maxWidth: 1240, margin: "0 auto", display: "grid", gap: 10,
     } as React.CSSProperties,
-    compareTable: { width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 14 } as React.CSSProperties,
-    thtd: { borderBottom: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left" } as React.CSSProperties,
-
-    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 20, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
+    compareTable: {
+      width: "100%", borderCollapse: "separate", borderSpacing: 0,
+    } as React.CSSProperties,
+    thtd: {
+      borderBottom: "1px solid #e2e8f0", padding: "8px 10px", textAlign: "left",
+    } as React.CSSProperties,
   };
 
   const globalCSS = `
     a.logo, .site-logo, a[href*="logo"], img.logo, img[alt*="TripTrio"] { text-decoration: none!important; border-bottom: 0!important; }
   `;
 
-  const passengersTotal = adults + children + infants;
-
-  /* -------------------- RENDER -------------------- */
   return (
-    <div style={{ padding: 12, display: "grid", gap: 14 }}>
+    <div style={s.wrap}>
       <style>{globalCSS}</style>
 
       {/* HERO */}
       <section>
-        <h1 style={{ margin: "0 0 6px", fontWeight: 900, fontSize: 32, letterSpacing: "-0.02em" }}>
+        <h1 style={{ margin: "0 0 6px", fontWeight: 900, fontSize: 30, letterSpacing: "-0.02em" }}>
           Find your perfect trip
         </h1>
-        <p style={{ margin: 0, display: "flex", gap: 10, alignItems: "center", color: "#334155", fontWeight: 700, flexWrap: "wrap", fontSize: 15 }}>
+        <p style={{ margin: 0, display: "flex", gap: 10, alignItems: "center", color: "#334155", fontWeight: 700, flexWrap: "wrap" }}>
           <span style={{ padding: "6px 12px", borderRadius: 999, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", fontWeight: 900 }}>
             Top-3 picks
           </span>
@@ -558,12 +507,12 @@ export default function Page() {
             </select>
           </div>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
               <input type="checkbox" checked={refundable} onChange={(e) => setRefundable(e.target.checked)} /> Refundable
             </label>
           </div>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
               <input type="checkbox" checked={greener} onChange={(e) => setGreener(e.target.checked)} /> Greener
             </label>
           </div>
@@ -581,40 +530,28 @@ export default function Page() {
           </div>
           <div>
             <label style={s.label}>Min budget</label>
-            <input
-              type="number"
-              placeholder="min"
-              min={0}
-              style={s.input}
+            <input type="number" placeholder="min" min={0} style={s.input}
               value={minBudget === "" ? "" : String(minBudget)}
               onChange={(e) => {
                 if (e.target.value === "") return setMinBudget("");
-                const v = Number(e.target.value);
-                setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
-              }}
-            />
+                const v = Number(e.target.value); setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }} />
           </div>
           <div>
             <label style={s.label}>Max budget</label>
-            <input
-              type="number"
-              placeholder="max"
-              min={0}
-              style={s.input}
+            <input type="number" placeholder="max" min={0} style={s.input}
               value={maxBudget === "" ? "" : String(maxBudget)}
               onChange={(e) => {
                 if (e.target.value === "") return setMaxBudget("");
-                const v = Number(e.target.value);
-                setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
-              }}
-            />
+                const v = Number(e.target.value); setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }} />
           </div>
         </div>
 
         {/* Include hotel */}
         <div style={{ ...s.row, gridTemplateColumns: "170px 1fr 1fr 1fr" }}>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
               <input type="checkbox" checked={includeHotel} onChange={(e) => setIncludeHotel(e.target.checked)} /> Include hotel
             </label>
           </div>
@@ -649,65 +586,8 @@ export default function Page() {
         </div>
       </form>
 
-      {/* COMPARE PANEL — ABOVE the results, with more details */}
-      {compareMode && comparedPkgs.length >= 2 && (
-        <section style={s.comparePanel} aria-live="polite">
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 18 }}>Compare ({comparedPkgs.length} of 3)</div>
-            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={s.compareTable}>
-              <thead>
-                <tr>
-                  <th style={s.thtd}>Airline</th>
-                  <th style={s.thtd}>Cabin</th>
-                  <th style={s.thtd}>Route</th>
-                  <th style={s.thtd}>Stops</th>
-                  <th style={s.thtd}>Outbound duration</th>
-                  <th style={s.thtd}>Refundable</th>
-                  <th style={s.thtd}>Greener</th>
-                  <th style={s.thtd}>Flight price</th>
-                  <th style={s.thtd}>Bundle total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparedPkgs.map((p) => {
-                  const airline = p.flight?.carrier_name || p.flight?.carrier || "Airline";
-                  const stops = typeof p.flight?.stops === "number" ? p.flight.stops : Math.max(0, (p.flight?.segments_out?.length || 1) - 1);
-                  const outDur = durationFromSegs(segsFromFlight(p.flight, "out"));
-                  const from = p.flight?.segments_out?.[0]?.from || p.origin || "—";
-                  const to = p.flight?.segments_out?.[p.flight?.segments_out?.length - 1]?.to || p.destination || "—";
-                  const flightOnly =
-                    num(p.flight_total) ??
-                    num(p.total_cost_flight) ??
-                    num(p.flight?.price_usd_converted) ??
-                    num(p.flight?.price_usd) ??
-                    num(p.total_cost) ?? 0;
-                  const bundle =
-                    num(p.total_cost) ?? flightOnly + (num(p.hotel_total) ?? 0);
-                  return (
-                    <tr key={p.id}>
-                      <td style={s.thtd}>{airline}</td>
-                      <td style={s.thtd}>{p.flight?.cabin || "—"}</td>
-                      <td style={s.thtd}>{from} → {to}</td>
-                      <td style={s.thtd}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</td>
-                      <td style={s.thtd}>{outDur ? `${Math.floor(outDur/60)}h ${outDur%60}m` : "—"}</td>
-                      <td style={s.thtd}>{p.flight?.refundable ? "Yes" : "No"}</td>
-                      <td style={s.thtd}>{p.flight?.greener ? "Yes" : "—"}</td>
-                      <td style={s.thtd}>{Math.round(Number(flightOnly))} {p.currency || "USD"}</td>
-                      <td style={s.thtd}>{Math.round(Number(bundle))} {p.currency || "USD"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
       {/* TOOLBAR */}
-      <div style={s.toolbar}>
+      <div style={toolbarStyle}>
         <div style={s.chips} role="tablist" aria-label="Sort">
           {(["best", "cheapest", "fastest", "flexible"] as const).map((k) => (
             <button key={k} role="tab" aria-selected={sort === k}
@@ -725,7 +605,7 @@ export default function Page() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ ...s.chip, background: "#f1f5f9" }}>Saved: <strong>{savedCount}</strong></span>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
             <input type="checkbox" checked={compareMode} onChange={(e) => setCompareMode(e.target.checked)} /> Compare
           </label>
         </div>
@@ -735,6 +615,9 @@ export default function Page() {
       {error && <div style={{ ...s.msg, ...s.error }} role="alert">⚠ {error}</div>}
       {hotelWarning && !error && <div style={{ ...s.msg, ...s.warn }}>ⓘ {hotelWarning}</div>}
       {loading && <div style={s.msg}>Searching…</div>}
+      {!loading && sortedResults && sortedResults.length <= 3 && (
+        <div style={s.msg}>Showing {sortedResults.length} result(s). “All” equals “Top-3” when there are only {sortedResults.length} items.</div>
+      )}
       {!loading && results && results.length === 0 && <div style={s.msg}>No results matched your filters.</div>}
 
       {/* RESULTS — row-wise list */}
@@ -746,31 +629,79 @@ export default function Page() {
               pkg={pkg}
               index={i}
               currency={currency}
-              pax={adults + children + infants}
               comparedIds={compareMode ? comparedIds : undefined}
               onToggleCompare={compareMode ? toggleCompare : undefined}
               onSavedChangeGlobal={(count) => setSavedCount(count)}
-              // make the card fonts larger
-              large
             />
           ))}
         </div>
+      )}
+
+      {/* COMPARE PANEL */}
+      {compareMode && comparedPkgs.length >= 2 && (
+        <section style={s.comparePanel} aria-live="polite">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontWeight: 900, color: "#0f172a" }}>Compare ({comparedPkgs.length} of 3)</div>
+            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.compareTable}>
+              <thead>
+                <tr>
+                  <th style={s.thtd}>Airline</th>
+                  <th style={s.thtd}>Stops</th>
+                  <th style={s.thtd}>Outbound duration</th>
+                  <th style={s.thtd}>Price (basis)</th>
+                  <th style={s.thtd}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparedPkgs.map((p) => {
+                  const airline = p.flight?.carrier_name || p.flight?.carrier || "Airline";
+                  const stops = typeof p.flight?.stops === "number" ? p.flight.stops : Math.max(0, (p.flight?.segments_out?.length || 1) - 1);
+                  const outDur = durationFromSegs(segsFromFlight(p.flight, "out"));
+                  const price =
+                    sortBasis === "bundle"
+                      ? (num(p.total_cost) ?? (num(p.flight_total) ?? 0) + (num(p.hotel_total) ?? 0))
+                      : (num(p.flight_total) ??
+                         num(p.total_cost_flight) ??
+                         num(p.flight?.price_usd_converted) ??
+                         num(p.flight?.price_usd) ??
+                         num(p.total_cost) ?? 0);
+                  return (
+                    <tr key={p.id}>
+                      <td style={s.thtd}>{airline}</td>
+                      <td style={s.thtd}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</td>
+                      <td style={s.thtd}>{outDur ? `${Math.floor(outDur/60)}h ${outDur%60}m` : "—"}</td>
+                      <td style={s.thtd}>{Math.round(price)} {p.currency || "USD"}</td>
+                      <td style={s.thtd}>
+                        <button
+                          onClick={() => {
+                            // scroll to card
+                            const el = document.querySelector(`[data-offer-id="${p.id}"]`);
+                            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }}
+                          style={{ ...s.chip }}
+                        >
+                          View card
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   );
 }
 
 /* small style helpers */
-const segBase: React.CSSProperties = {
-  height: 42, padding: "0 12px", borderRadius: 10, border: "1px solid #e2e8f0",
-  background: "#fff", fontWeight: 900, fontSize: 14, lineHeight: 1, whiteSpace: "nowrap"
-};
+const segBase: React.CSSProperties = { height: 42, padding: "0 10px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800, fontSize: 13, lineHeight: 1, whiteSpace: "nowrap" };
 function segStyle(active: boolean): React.CSSProperties {
-  return active
-    ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" }
-    : segBase;
+  return active ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" } : segBase;
 }
-const primaryBtn: React.CSSProperties = {
-  height: 46, padding: "0 18px", border: "none", fontWeight: 900, color: "#fff",
-  background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 130, fontSize: 15
-};
+const primaryBtn: React.CSSProperties = { height: 42, padding: "0 16px", border: "none", fontWeight: 900, color: "#fff", background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 120 };
+const toolbarStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 8, gap: 8, flexWrap: "wrap", maxWidth: 1240, margin: "0 auto" };
