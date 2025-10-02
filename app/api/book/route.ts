@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-// Minimal normalizer so we can accept GET or POST
 function normalizeOffer(obj: any = {}) {
   const flight = obj.flight || {};
   const price =
@@ -24,8 +23,9 @@ function normalizeOffer(obj: any = {}) {
   };
 }
 
-function makeBookingUrl(offer: ReturnType<typeof normalizeOffer>) {
-  const params = new URLSearchParams();
+function makeBookingUrl(base: string, offer: ReturnType<typeof normalizeOffer>) {
+  const u = new URL(base);
+  const params = u.searchParams;
   params.set("airline", String(offer.airline));
   params.set("origin", String(offer.origin));
   params.set("destination", String(offer.destination));
@@ -33,16 +33,29 @@ function makeBookingUrl(offer: ReturnType<typeof normalizeOffer>) {
   params.set("pax", String(offer.pax));
   params.set("price", String(offer.price));
   params.set("ts", String(Date.now()));
+  return u.toString();
+}
 
-  // Replace with your real checkout later
-  return `https://triptrio.example/checkout?${params.toString()}`;
+/** Compute the base URL for checkout
+ * Priority:
+ * 1) NEXT_PUBLIC_BOOKING_BASE (e.g., https://yourdomain.com/checkout)
+ * 2) Same-origin /checkout
+ */
+function resolveBaseCheckoutUrl(req: Request) {
+  const envBase = process.env.NEXT_PUBLIC_BOOKING_BASE?.trim();
+  if (envBase) return envBase; // must include /checkout path or equivalent
+
+  // fallback to in-app checkout page
+  const origin = new URL(req.url).origin;
+  return `${origin}/checkout`;
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const offer = normalizeOffer(body?.offer || body);
-    const bookingUrl = makeBookingUrl(offer);
+    const base = resolveBaseCheckoutUrl(req);
+    const bookingUrl = makeBookingUrl(base, offer);
     return NextResponse.json({ ok: true, bookingUrl });
   } catch (err: any) {
     return NextResponse.json(
@@ -52,7 +65,7 @@ export async function POST(req: Request) {
   }
 }
 
-// GET fallback (avoids some environments throwing on POST)
+// GET fallback (some hosts block POST in previews)
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -67,7 +80,9 @@ export async function GET(req: Request) {
       pax: Number(url.searchParams.get("pax")) || undefined,
       price: Number(url.searchParams.get("price")) || undefined,
     });
-    const bookingUrl = makeBookingUrl(offer);
+
+    const base = resolveBaseCheckoutUrl(req);
+    const bookingUrl = makeBookingUrl(base, offer);
     return NextResponse.json({ ok: true, bookingUrl });
   } catch (err: any) {
     return NextResponse.json(
