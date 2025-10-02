@@ -6,11 +6,10 @@ type Props = {
   pkg: any;
   index?: number;
   currency: string;
-  pax?: number;
+  pax?: number;                              // <<< new: to pass to booking
   comparedIds?: string[];
   onToggleCompare?: (id: string) => void;
   onSavedChangeGlobal?: (count: number) => void;
-  large?: boolean; // <<< enlarge fonts
 };
 
 export default function ResultCard({
@@ -21,7 +20,6 @@ export default function ResultCard({
   comparedIds,
   onToggleCompare,
   onSavedChangeGlobal,
-  large = false,
 }: Props) {
   const id = pkg.id || `r-${index}`;
   const airline = pkg.flight?.carrier_name || pkg.flight?.carrier || "Airline";
@@ -33,10 +31,9 @@ export default function ResultCard({
     pkg.flight?.price_usd ??
     0;
 
-  const stops =
-    typeof pkg.flight?.stops === "number"
-      ? pkg.flight.stops
-      : Math.max(0, (pkg.flight?.segments_out?.length || 1) - 1);
+  const stops = typeof pkg.flight?.stops === "number"
+    ? pkg.flight.stops
+    : Math.max(0, (pkg.flight?.segments_out?.length || 1) - 1);
 
   const outSegs = pkg.flight?.segments_out || [];
   const inSegs = pkg.flight?.segments_in || [];
@@ -57,12 +54,13 @@ export default function ResultCard({
               destination: outSegs?.[outSegs.length - 1]?.to || pkg.destination,
               price_usd: price,
             },
-            pax,
+            pax,                                  // <<< ensure pax is propagated
           },
         }),
       });
       const j = await res.json();
       if (!res.ok || !j?.bookingUrl) throw new Error(j?.error || "Failed to create booking");
+      // append pax in case your checkout reads it from URL
       const url = new URL(j.bookingUrl);
       url.searchParams.set("pax", String(pax));
       window.location.href = url.toString();
@@ -76,13 +74,11 @@ export default function ResultCard({
   const dateOut = (outSegs?.[0]?.depart_time || "").slice(0, 10);
   const dateRet = (inSegs?.[0]?.depart_time || "").slice(0, 10);
   const gf =
-    `https://www.google.com/travel/flights?q=Flights%20to%20${encodeURIComponent(route)}%20on%20${encodeURIComponent(
-      dateOut
-    )}` + (dateRet ? `%20return%20${encodeURIComponent(dateRet)}` : "");
+    `https://www.google.com/travel/flights?q=Flights%20to%20${encodeURIComponent(route)}%20on%20${encodeURIComponent(dateOut)}` +
+    (dateRet ? `%20return%20${encodeURIComponent(dateRet)}` : "");
   const sky =
     `https://www.skyscanner.com/transport/flights/${encodeURIComponent(route.replace("-", "/"))}/${dateOut}` +
-    (dateRet ? `/${dateRet}` : "") +
-    `/?adults=${pax}`;
+    (dateRet ? `/${dateRet}` : "") + `/?adults=${pax}`;
 
   // ---- Save (requires login) ----
   const [saving, setSaving] = useState(false);
@@ -113,22 +109,16 @@ export default function ResultCard({
   const hotels: any[] = Array.isArray(pkg.hotels) ? pkg.hotels : [];
   const groupedHotels = useMemo(() => {
     const map = new Map<number, any[]>();
-    for (let i = 0; i < hotels.length; i++) {
-      const h = hotels[i];
-      const s = Number(h?.stars) || 0;
-      const arr = map.get(s) || [];
-      arr.push(h);
-      map.set(s, arr);
-    }
-    map.forEach((arr, k) => {
-      map.set(k, arr.slice(0, 3));
+    hotels.forEach((h) => {
+      const s = Number(h.stars) || 0;
+      if (!map.has(s)) map.set(s, []);
+      map.get(s)!.push(h);
     });
-    const entries: Array<[number, any[]]> = Array.from(map.entries());
-    entries.sort((a, b) => b[0] - a[0]);
-    return entries;
+    // keep only top 3 per tier
+    for (const [k, arr] of map.entries()) map.set(k, arr.slice(0, 3));
+    // sort tiers: 5★ to 3★
+    return [...map.entries()].sort((a, b) => b[0] - a[0]);
   }, [hotels]);
-
-  const fsBase = large ? 15 : 14;
 
   return (
     <article
@@ -137,77 +127,48 @@ export default function ResultCard({
         background: "#fff",
         border: "1px solid #e5e7eb",
         borderRadius: 16,
-        padding: 14,
+        padding: 12,
         display: "grid",
-        gap: 12,
-        fontSize: fsBase,
-        boxShadow: "0 8px 24px rgba(2,6,23,.05)",
+        gap: 10,
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <strong style={{ fontSize: large ? 18 : 16 }}>{airline}</strong>
+          <strong style={{ fontSize: 16 }}>{airline}</strong>
           <span style={{ opacity: 0.6 }}>•</span>
-          <span style={{ fontWeight: 800 }}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
+          <span>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {onToggleCompare && (
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 900, color: "#334155" }}>
-              <input type="checkbox" checked={!!isCompared} onChange={() => onToggleCompare(id)} />
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+              <input
+                type="checkbox"
+                checked={!!isCompared}
+                onChange={() => onToggleCompare(id)}
+              />
               Compare
             </label>
           )}
-          <button
-            onClick={requireLoginThenSave}
-            disabled={saving}
-            style={{
-              height: 34,
-              padding: "0 14px",
-              borderRadius: 999,
-              border: "1px solid #e2e8f0",
-              background: "#fff",
-              fontWeight: 900,
-            }}
-          >
+          <button onClick={requireLoginThenSave} disabled={saving}
+            style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </header>
 
-      {/* Price + booking buttons */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontWeight: 900, fontSize: large ? 22 : 18 }}>
+      {/* Flight summary */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 900, fontSize: 18 }}>
           {Math.round(Number(price))} {pkg.currency || currency}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a
-            href={gf}
-            target="_blank"
-            rel="noreferrer"
-            style={{ height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900 }}
-          >
-            Google Flights
-          </a>
-          <a
-            href={sky}
-            target="_blank"
-            rel="noreferrer"
-            style={{ height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900 }}
-          >
-            Skyscanner
-          </a>
-          <button
-            onClick={bookViaTripTrio}
-            style={{
-              height: 34,
-              padding: "0 14px",
-              borderRadius: 999,
-              border: "none",
-              color: "#fff",
-              fontWeight: 900,
-              background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
-            }}
-          >
+          <a href={gf} target="_blank" rel="noreferrer"
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>Google Flights</a>
+          <a href={sky} target="_blank" rel="noreferrer"
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}>Skyscanner</a>
+          <button onClick={bookViaTripTrio}
+             style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "none", color: "#fff", fontWeight: 900,
+                      background: "linear-gradient(90deg,#06b6d4,#0ea5e9)" }}>
             Book via TripTrio
           </button>
         </div>
@@ -215,12 +176,14 @@ export default function ResultCard({
 
       {/* Layovers display */}
       {Array.isArray(outSegs) && outSegs.length > 0 && (
-        <div style={{ fontSize: fsBase - 1, color: "#334155" }}>
+        <div style={{ fontSize: 13, color: "#334155" }}>
           <b>Outbound:</b>{" "}
           {outSegs.map((s: any, i: number) => {
             const segText = `${s.from} → ${s.to}`;
             const layover =
-              i < outSegs.length - 1 ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m` : "";
+              i < outSegs.length - 1
+                ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m`
+                : "";
             return (
               <span key={i}>
                 {segText}
@@ -232,12 +195,14 @@ export default function ResultCard({
         </div>
       )}
       {Array.isArray(inSegs) && inSegs.length > 0 && (
-        <div style={{ fontSize: fsBase - 1, color: "#334155" }}>
+        <div style={{ fontSize: 13, color: "#334155" }}>
           <b>Return:</b>{" "}
           {inSegs.map((s: any, i: number) => {
             const segText = `${s.from} → ${s.to}`;
             const layover =
-              i < inSegs.length - 1 ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m` : "";
+              i < inSegs.length - 1
+                ? ` — layover before next: ~${Math.max(45, 30 + i * 20)}m`
+                : "";
             return (
               <span key={i}>
                 {segText}
@@ -251,38 +216,19 @@ export default function ResultCard({
 
       {/* Hotels block (if present) */}
       {groupedHotels.length > 0 && (
-        <section style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "grid", gap: 8 }}>
+        <section style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8, display: "grid", gap: 8 }}>
           <div style={{ fontWeight: 900, color: "#0f172a" }}>Hotels (top 3 per star)</div>
           <div style={{ display: "grid", gap: 8 }}>
             {groupedHotels.map(([stars, arr]) => (
               <div key={String(stars)}>
-                <div style={{ fontWeight: 900, color: "#334155", marginBottom: 6 }}>{stars}★</div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: 10,
-                  }}
-                >
+                <div style={{ fontWeight: 800, color: "#334155", marginBottom: 6 }}>{stars}★</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
                   {(arr as any[]).map((h, i) => (
-                    <a
-                      key={i}
-                      href={h.link || "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: 10,
-                        padding: 10,
-                        textDecoration: "none",
-                        color: "#0f172a",
-                        display: "grid",
-                        gap: 4,
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>{h.name}</div>
-                      <div style={{ color: "#475569", fontSize: fsBase - 2 }}>
-                        {Math.round(h.price || 0)} {h.currency || pkg.currency || "USD"}
+                    <a key={i} href={h.link || "#"} target="_blank" rel="noreferrer"
+                       style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 8, textDecoration: "none", color: "#0f172a" }}>
+                      <div style={{ fontWeight: 800 }}>{h.name}</div>
+                      <div style={{ color: "#475569", fontSize: 12 }}>
+                        {Math.round(h.price || 0)} {pkg.currency || "USD"}
                       </div>
                     </a>
                   ))}
