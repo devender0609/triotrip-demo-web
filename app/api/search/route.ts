@@ -36,7 +36,6 @@ type SearchPayload = {
   greener?: boolean;
 };
 
-/* ---------------- helpers ---------------- */
 function assertString(v: any): v is string {
   return typeof v === "string" && v.length > 0;
 }
@@ -51,7 +50,6 @@ function sumSegMinutes(segs: any[]): number {
   return segs.reduce((t, s) => t + (Number(s?.duration_minutes) || 0), 0);
 }
 
-/** Make a deterministic-ish price from route + date (keeps demos consistent) */
 function basePrice(origin: string, destination: string, date: string) {
   const seed = (s: string) =>
     s.split("").reduce((a, c) => (a * 33 + c.charCodeAt(0)) % 9973, 7);
@@ -59,23 +57,72 @@ function basePrice(origin: string, destination: string, date: string) {
   return 120 + (v % 160); // 120–279
 }
 
-/** Build a few demo itineraries */
+/** crude but direct airline URLs; if deep link params aren't supported, we route to the airline's booking page */
+function airlineUrl(carrier: string, origin: string, destination: string, departDate: string, roundTrip: boolean, returnDate?: string) {
+  const d = departDate; // yyyy-mm-dd
+  const r = returnDate;
+  const c = carrier.toLowerCase();
+
+  // Known patterns (not guaranteed for all locales; fallback to home booking)
+  if (c.includes("united")) {
+    // https://www.united.com/en-us/flight-search
+    return `https://www.united.com/en-us/flight-search?from=${origin}&to=${destination}&depDate=${d}${roundTrip && r ? `&retDate=${r}` : ""}`;
+  }
+  if (c.includes("american")) {
+    // https://www.aa.com/booking/find-flights
+    return `https://www.aa.com/booking/find-flights?tripType=${roundTrip ? "roundTrip" : "oneWay"}&from=${origin}&to=${destination}&departDate=${d}${roundTrip && r ? `&returnDate=${r}` : ""}`;
+  }
+  if (c.includes("delta")) {
+    // https://www.delta.com/flight-search/book-a-flight
+    return `https://www.delta.com/flight-search/book-a-flight?fromCity=${origin}&toCity=${destination}&departureDate=${d}${roundTrip && r ? `&returnDate=${r}` : ""}`;
+  }
+  if (c.includes("southwest")) {
+    return `https://www.southwest.com/air/booking/select.html?originationAirportCode=${origin}&destinationAirportCode=${destination}&departureDate=${d}${roundTrip && r ? `&returnDate=${r}` : ""}`;
+  }
+  if (c.includes("alaska")) {
+    return `https://www.alaskaair.com/planbook?from=${origin}&to=${destination}&depart=${d}${roundTrip && r ? `&return=${r}` : ""}`;
+  }
+  if (c.includes("jetblue")) {
+    return `https://www.jetblue.com/booking/flights?from=${origin}&to=${destination}&depart=${d}${roundTrip && r ? `&return=${r}` : ""}`;
+  }
+  if (c.includes("air canada")) {
+    return `https://www.aircanada.com/`;// AC deeplink params are complex
+  }
+  if (c.includes("lufthansa")) {
+    return `https://www.lufthansa.com/`;// fallback
+  }
+  if (c.includes("british airways") || c === "ba" || c.includes("british")) {
+    return `https://www.britishairways.com/`;// fallback
+  }
+  if (c.includes("air india")) {
+    return `https://www.airindia.com/`;// fallback
+  }
+  // generic fallback: airline name search page (but on airline domain)
+  return `https://www.${carrier.replace(/\s+/g, "").toLowerCase()}.com/`;
+}
+
+function attachAirlineLink(pkg: any, p: SearchPayload) {
+  const carrier = pkg?.flight?.carrier_name || pkg?.flight?.carrier;
+  if (!carrier) return pkg;
+  const url = airlineUrl(carrier, p.origin, p.destination, p.departDate, p.roundTrip, p.returnDate);
+  pkg.deeplinks = {
+    ...(pkg.deeplinks || {}),
+    airline: { name: carrier, url },
+  };
+  pkg.flight.deeplinks = {
+    ...(pkg.flight.deeplinks || {}),
+    airline: { name: carrier, url },
+  };
+  return pkg;
+}
+
 function buildCandidates(p: SearchPayload) {
   const {
-    origin,
-    destination,
-    departDate,
-    returnDate,
-    roundTrip,
-    cabin,
-    refundable,
-    greener,
-    currency,
+    origin, destination, departDate, returnDate, roundTrip, cabin, currency,
   } = p;
 
   const bp = basePrice(origin, destination, departDate);
 
-  // Outbound templates
   const directOut = [
     { from: origin, to: destination, depart_time: `${departDate}T08:10`, arrive_time: `${departDate}T10:55`, duration_minutes: 165 },
   ];
@@ -89,7 +136,6 @@ function buildCandidates(p: SearchPayload) {
     { from: "PHX", to: destination, depart_time: `${departDate}T11:10`, arrive_time: `${departDate}T13:05`, duration_minutes: 115 },
   ];
 
-  // Return templates
   const directIn = roundTrip
     ? [{ from: destination, to: origin, depart_time: `${returnDate}T17:40`, arrive_time: `${returnDate}T20:20`, duration_minutes: 160 }]
     : undefined;
@@ -100,7 +146,6 @@ function buildCandidates(p: SearchPayload) {
       ]
     : undefined;
 
-  // 3 candidates: nonstop (fastest), 1-stop (cheapest), 2-stop (flex-ish)
   const candidates = [
     {
       id: "CAND-1",
@@ -155,10 +200,9 @@ function buildCandidates(p: SearchPayload) {
     },
   ];
 
-  // Attach hotel if requested
   if (p.includeHotel) {
     const star = Math.max(3, Math.min(5, (p.minHotelStar ?? 0) || 4));
-    const price = 95 + (bp % 60); // 95–154
+    const price = 95 + (bp % 60);
     const nights = Math.max(1, p.nights ?? 1);
     candidates.forEach((c, i) => {
       c["hotel"] = {
@@ -177,64 +221,14 @@ function buildCandidates(p: SearchPayload) {
     });
   }
 
-  // Apply requested refundable/greener filters (only if true)
-  let filtered = candidates.slice();
-  if (p.refundable) {
-    filtered = filtered.filter((c) => c.flight?.refundable);
-  }
-  if (p.greener) {
-    filtered = filtered.filter((c) => c.flight?.greener);
-  }
-
-  // max stops filter
-  if (typeof p.maxStops === "number") {
-    filtered = filtered.filter((c) => (c.flight?.stops ?? 99) <= p.maxStops!);
-  }
-
-  // min/max budget filter
-  if (num(p.minBudget) !== undefined) {
-    filtered = filtered.filter((c) => c.total_cost >= (p.minBudget as number));
-  }
-  if (num(p.maxBudget) !== undefined) {
-    filtered = filtered.filter((c) => c.total_cost <= (p.maxBudget as number));
-  }
-
-  // Sort
-  const key = p.sort || "best";
-  if (key === "cheapest") {
-    filtered.sort((a, b) => a.total_cost - b.total_cost);
-  } else if (key === "fastest") {
-    filtered.sort((a, b) => (a.flight?.duration_minutes ?? 1e9) - (b.flight?.duration_minutes ?? 1e9));
-  } else if (key === "flexible") {
-    // Prefer refundable; then cheaper
-    filtered.sort((a, b) => {
-      const ra = a.flight?.refundable ? 0 : 1;
-      const rb = b.flight?.refundable ? 0 : 1;
-      if (ra !== rb) return ra - rb;
-      return a.total_cost - b.total_cost;
-    });
-  } else {
-    // "best": mix of price + duration (simple score)
-    filtered.sort((a, b) => {
-      const ap = a.total_cost;
-      const bp_ = b.total_cost;
-      const ad = a.flight?.duration_minutes ?? 1e9;
-      const bd = b.flight?.duration_minutes ?? 1e9;
-      const ascore = ap * 1.0 + ad * 0.2;
-      const bscore = bp_ * 1.0 + bd * 0.2;
-      return ascore - bscore;
-    });
-  }
-
-  return filtered;
+  // add airline direct link per candidate
+  return candidates.map((c) => attachAirlineLink(c, p));
 }
 
-/* ---------------- POST handler ---------------- */
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as SearchPayload;
 
-    // Basic validation
     if (!assertString(body.origin) || !assertString(body.destination)) {
       return NextResponse.json(
         { error: "Origin and destination are required." },
@@ -254,14 +248,43 @@ export async function POST(req: Request) {
       );
     }
 
-    // Build demo results (replace with your real GDS/Amadeus call when ready)
-    const results = buildCandidates(body);
+    let results = buildCandidates(body);
 
-    // Optional hotel warning (example)
+    // user filters
+    if (body.refundable) results = results.filter((c) => c.flight?.refundable);
+    if (body.greener) results = results.filter((c) => c.flight?.greener);
+    if (typeof body.maxStops === "number")
+      results = results.filter((c) => (c.flight?.stops ?? 99) <= body.maxStops!);
+    if (num(body.minBudget) !== undefined)
+      results = results.filter((c) => c.total_cost >= (body.minBudget as number));
+    if (num(body.maxBudget) !== undefined)
+      results = results.filter((c) => c.total_cost <= (body.maxBudget as number));
+    if (body.includeHotel && body.minHotelStar)
+      results = results.filter((c) => !c.hotel || (c.hotel.star || 0) >= body.minHotelStar!);
+
+    // sort
+    const k = body.sort || "best";
+    if (k === "cheapest") results.sort((a, b) => a.total_cost - b.total_cost);
+    else if (k === "fastest")
+      results.sort(
+        (a, b) => (a.flight?.duration_minutes ?? 1e9) - (b.flight?.duration_minutes ?? 1e9)
+      );
+    else if (k === "flexible")
+      results.sort((a, b) => {
+        const ra = a.flight?.refundable ? 0 : 1;
+        const rb = b.flight?.refundable ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+        return a.total_cost - b.total_cost;
+      });
+    else
+      results.sort((a, b) => {
+        const as = a.total_cost * 1.0 + (a.flight?.duration_minutes ?? 1e9) * 0.2;
+        const bs = b.total_cost * 1.0 + (b.flight?.duration_minutes ?? 1e9) * 0.2;
+        return as - bs;
+      });
+
     const hotelWarning =
-      body.includeHotel && !body.nights
-        ? "Using 1 night by default for hotel pricing."
-        : null;
+      body.includeHotel && !body.nights ? "Using 1 night by default for hotel pricing." : null;
 
     return NextResponse.json({ results, hotelWarning });
   } catch (e: any) {
