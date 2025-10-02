@@ -48,15 +48,10 @@ const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
 /** Try multiple patterns to extract IATA code from a display string */
 function extractIATA(display: string): string {
   const s = String(display || "").toUpperCase().trim();
-
-  // (BOS)
   let m = /\(([A-Z]{3})\)/.exec(s);
   if (m) return m[1];
-
-  // BOS — Boston ...  OR  BOS - Boston ...
   m = /^([A-Z]{3})\b/.exec(s);
   if (m) return m[1];
-
   return "";
 }
 
@@ -213,6 +208,19 @@ export default function Page() {
       }
       if (adults < 1) throw new Error("At least 1 adult is required.");
 
+      // ===== Budget validation (non-negative + min ≤ max) =====
+      if (minBudget !== "" && minBudget < 0) throw new Error("Min budget cannot be negative.");
+      if (maxBudget !== "" && maxBudget < 0) throw new Error("Max budget cannot be negative.");
+      if (
+        minBudget !== "" &&
+        maxBudget !== "" &&
+        typeof minBudget === "number" &&
+        typeof maxBudget === "number" &&
+        minBudget > maxBudget
+      ) {
+        throw new Error("Min budget cannot be greater than max budget.");
+      }
+
       const payload: SearchPayload = {
         origin,
         destination,
@@ -243,8 +251,6 @@ export default function Page() {
         greener,
       };
 
-      // IMPORTANT: same-origin Next API route (no CORS)
-      console.log("[runSearch] POST /api/search", payload);
       const r = await fetch(`/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -280,7 +286,7 @@ export default function Page() {
     );
   }
 
-  /* ---------- PDF export (with logo + hotel info + children ages) ---------- */
+  /* ---------- PDF export helpers (unchanged) ---------- */
   async function loadFirstLogo(): Promise<string | null> {
     const candidates = [
       "/triptrio-logo.png",
@@ -499,12 +505,11 @@ export default function Page() {
       key: string;
       label: string;
       values: (string | number | undefined)[];
-      better: "min" | "max" | null; // how to pick winners
+      better: "min" | "max" | null;
       fmt?: (v: any) => string;
     }[] = [];
 
     if (selected.length > 0) {
-      // Always include the hotel metrics (even if some options lack a hotel)
       rows.push({
         key: "hotel",
         label: "Hotel",
@@ -529,7 +534,6 @@ export default function Page() {
         fmt: (v) => fmtCurrency(num(v), "USD"),
       });
 
-      // Flight/total metrics
       const totals = selected.map((p) => {
         const f = p.flight || {};
         return (
@@ -649,7 +653,6 @@ export default function Page() {
       });
     }
 
-    // winners per metric
     const winners: Record<string, number[]> = {};
     rows.forEach((r) => {
       if (!r.better) return;
@@ -695,6 +698,7 @@ export default function Page() {
           <div>
             <label>Origin</label>
             <AirportField
+              id="origin"
               label=""
               code={originCode}
               initialDisplay={originDisplay}
@@ -722,6 +726,7 @@ export default function Page() {
           <div>
             <label>Destination</label>
             <AirportField
+              id="destination"
               label=""
               code={destCode}
               initialDisplay={destDisplay}
@@ -914,10 +919,13 @@ export default function Page() {
             <input
               type="number"
               placeholder="min"
+              min={0}
               value={minBudget === "" ? "" : String(minBudget)}
-              onChange={(e) =>
-                setMinBudget(e.target.value === "" ? "" : Number(e.target.value))
-              }
+              onChange={(e) => {
+                if (e.target.value === "") return setMinBudget("");
+                const v = Number(e.target.value);
+                setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }}
             />
           </div>
 
@@ -926,10 +934,13 @@ export default function Page() {
             <input
               type="number"
               placeholder="max"
+              min={0}
               value={maxBudget === "" ? "" : String(maxBudget)}
-              onChange={(e) =>
-                setMaxBudget(e.target.value === "" ? "" : Number(e.target.value))
-              }
+              onChange={(e) => {
+                if (e.target.value === "") return setMaxBudget("");
+                const v = Number(e.target.value);
+                setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }}
             />
           </div>
         </div>
@@ -1077,7 +1088,7 @@ export default function Page() {
                 })}
               </div>
 
-              {/* body rows (already include hotel metrics first) */}
+              {/* body rows */}
               {compareCalc &&
                 compareCalc.rows.map((r) => (
                   <div className="cp-row" role="row" key={r.key}>
@@ -1125,7 +1136,7 @@ export default function Page() {
         </div>
       )}
 
-      {/* STICKY COMPARE BAR (kept for quick clear) */}
+      {/* STICKY COMPARE BAR */}
       {compareMode && comparedIds.length > 0 && (
         <div className="comparebar" role="region" aria-label="Compare selection">
           <div className="title">Compare ({comparedIds.length}/3 selected)</div>
@@ -1138,70 +1149,55 @@ export default function Page() {
         </div>
       )}
 
-      {/* styles */}
+      {/* styles (unchanged) */}
       <style jsx>{`
         .wrap { padding: 16px; display: grid; gap: 16px; }
-
         .hero { padding-top: 4px; }
         .hero-title { margin: 0 0 6px; font-weight: 900; font-size: 30px; letter-spacing: -0.02em; }
         .hero-sub { margin: 0; display: flex; gap: 10px; align-items: center; color: #334155; font-weight: 700; flex-wrap: wrap; }
         .hero-badge { padding: 6px 12px; border-radius: 999px; background: linear-gradient(90deg,#06b6d4,#0ea5e9); color: #fff; font-weight: 900; }
         .dot { opacity: .6; }
-
-        .panel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:14px; display:grid; gap:12px;
-                 max-width: 1200px; margin: 0 auto; }
-
+        .panel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:14px; display:grid; gap:12px; max-width: 1200px; margin: 0 auto; }
         label { font-weight:800; color:#334155; display:block; margin-bottom:6px; }
         input[type="date"], input[type="number"], input[type="text"], select {
           height:42px; padding:0 10px; border:1px solid #e2e8f0; border-radius:10px; width:100%; background:#fff;
         }
-
         .row { display:grid; gap:12px; align-items:end; }
         .row.two { grid-template-columns: 1fr 54px 1fr; }
         .row.three { grid-template-columns: 1fr 1fr 1fr; }
         .row.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
         .row.dates-passengers { grid-template-columns: 170px 1fr 1fr minmax(320px, 440px) 130px; align-items:end; }
         .row.hotelRow { grid-template-columns: 170px 1fr 1fr 1fr; }
-
         .segbtns { display: inline-flex; gap: 8px; align-items: center; }
         .seg { height:42px; padding:0 10px; border-radius:10px; border:1px solid #e2e8f0; background:#fff; font-weight:800; font-size:13px; line-height:1; white-space:nowrap; }
         .seg.active { background:linear-gradient(90deg,#06b6d4,#0ea5e9); color:#fff; border:none; }
         .tripToggle { min-width:170px; }
-
         .swapcell { display:flex; align-items:flex-end; justify-content:center; }
         .swap { height:42px; width:42px; border-radius:12px; border:1px solid #e2e8f0; background:#fff; cursor:pointer; font-size:18px;
                 box-shadow: 0 1px 0 rgba(2,6,23,.04), inset 0 -2px 0 rgba(2,6,23,.02); }
-
         .paxGrid { display:grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap:8px; align-items:center; }
         .paxCell input { width: 100%; }
         .paxLbl { display:block; font-size:12px; color:#475569; margin-bottom:4px; font-weight:800; }
-
         .agesWrap { margin-top: 8px; }
         .agesTitle { font-weight:800; color:#334155; font-size:12px; margin-bottom:6px; }
         .agesGrid { display:grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap:8px; }
         .ageLbl { display:block; font-size:11px; color:#64748b; margin-bottom:4px; font-weight:800; }
-
         .searchBtnCell { display:flex; justify-content:flex-end; align-items:end; }
         .primary { height:42px; padding:0 16px; border:none; font-weight:900; color:#fff; background:linear-gradient(90deg,#06b6d4,#0ea5e9); border-radius:10px; min-width:120px; }
-
         .chk .ck { display:flex; gap:8px; align-items:center; font-weight:800; color:#334155; }
         .ck input { transform: translateY(1px); }
-
         .toolbar { display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid #e5e7eb;
                    border-radius:16px; padding:8px; gap:8px; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
         .chips, .viewchips { display:flex; gap:8px; flex-wrap:wrap; }
         .chip { height:32px; padding:0 12px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; font-weight:800; }
         .chip.active { border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.15) inset; }
         .right { display:flex; align-items:center; gap:8px; }
-
-        /* Compare panel (TOP) */
         .comparePanel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px; display:grid; gap:12px; max-width:1200px; margin:0 auto; }
-        .comparePanel.top { order: 2; } /* sits after toolbar, before results */
+        .comparePanel.top { order: 2; }
         .cp-head { display:flex; align-items:baseline; gap:12px; justify-content:space-between; flex-wrap:wrap; }
         .cp-title { font-weight:900; font-size:18px; color:#0f172a; }
         .cp-sub { color:#475569; font-weight:700; }
         .hint { padding:8px 10px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px; font-weight:700; }
-
         .cp-table { overflow-x:auto; }
         .cp-row { display:grid; grid-template-columns: 220px repeat(var(--cols, 3), minmax(200px, 1fr)); }
         .cp-row.head { border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
@@ -1210,20 +1206,16 @@ export default function Page() {
         .cp-cell.win { background:#ecfeff; border-bottom-color:#a5f3fc; }
         .cp-coltitle { font-weight:900; }
         .sticky { position: sticky; left: 0; background:#fff; z-index: 1; border-right:1px solid #e5e7eb; }
-
         .results { display:grid; gap:12px; max-width:1200px; margin:0 auto; }
         .loading, .empty, .error, .warn { padding:12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; max-width:1200px; margin:0 auto; }
         .error { border-color:#fecaca; background:#fef2f2; color:#991b1b; font-weight:800; }
         .warn { border-color:#fde68a; background:#fffbeb; color:#92400e; font-weight:700; }
-
         .comparebar { position: sticky; bottom: 8px; display:flex; gap:12px; align-items:center; justify-content:space-between;
           background:#0ea5e9; color:#fff; padding:10px 12px; border-radius:12px; box-shadow:0 10px 28px rgba(2,6,23,.25);
           max-width:1200px; margin:0 auto; }
         .comparebar .title { font-weight:900; }
         .comparebar .ids { opacity:.9; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .comparebar .btn { height:32px; padding:0 10px; border-radius:10px; background:#fff; color:#0ea5e9; border:none; font-weight:900; }
-
-        /* --- Responsive --- */
         @media (max-width: 1120px) {
           .row.dates-passengers { grid-template-columns: 160px 1fr 1fr minmax(300px, 1fr); }
           .searchBtnCell { grid-column: 1 / -1; justify-content: flex-end; }
