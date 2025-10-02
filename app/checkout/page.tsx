@@ -19,7 +19,6 @@ function CheckoutInner() {
   const router = useRouter();
   const params = useSearchParams();
 
-  // accept multiple deeplink shapes
   const flightId = params.get("flightId") || "";
   const airline = params.get("airline") || "Airline";
   const origin = params.get("origin") || "—";
@@ -113,7 +112,6 @@ function CheckoutInner() {
       }
 
       alert("Sandbox booking successful!");
-      // router.push("/success"); // add when you have a success page
     } catch (e: any) {
       alert(e?.message || "Checkout failed");
     }
@@ -122,7 +120,7 @@ function CheckoutInner() {
   /* ------------------------------ UI ------------------------------ */
   return (
     <main style={outer}>
-      {/* Top bar */}
+      {/* Top bar (reduced gap) */}
       <div style={topbar}>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button onClick={() => router.back()} style={btnGhost}>← Back</button>
@@ -134,22 +132,12 @@ function CheckoutInner() {
         <div style={secureBadge}>🔒 Secure sandbox checkout</div>
       </div>
 
-      {/* Stepper */}
-      <ol style={stepper} aria-label="Checkout steps">
-        {["Review", "Passengers", "Payment"].map((label, i) => (
-          <li key={label} style={stepItem(i === 1)}>
-            <span style={stepCircle(i === 1)}>{i + 1}</span>
-            <span>{label}</span>
-          </li>
-        ))}
-      </ol>
-
       {/* Grid layout */}
       <div style={grid}>
         {/* Left: forms */}
         <section style={card}>
           <h1 style={h1}>Passenger details</h1>
-          <p style={muted}>Enter traveler information exactly as it appears on government ID.</p>
+          <p style={muted}>Enter traveler information exactly as it appears on your ID.</p>
 
           {/* Contact */}
           <fieldset style={fieldset}>
@@ -191,12 +179,12 @@ function CheckoutInner() {
           <fieldset style={fieldset}>
             <legend style={legend}>Passengers ({pax})</legend>
 
-            <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gap: 10 }}>
               {passengers.map((p, i) => (
                 <div key={i} style={passengerCard}>
                   <div style={passengerHeader}>
                     <span style={pill}>#{i + 1}</span>
-                    <strong>Primary traveler</strong>
+                    <strong>Traveler</strong>
                   </div>
 
                   <div style={grid4}>
@@ -280,7 +268,7 @@ function CheckoutInner() {
           </div>
         </section>
 
-        {/* Right: sticky order summary */}
+        {/* Right: summary */}
         <aside style={summaryWrap}>
           <div style={summaryCard}>
             <div style={summaryHeader}>
@@ -314,8 +302,8 @@ function CheckoutInner() {
             >
               Pay &amp; Book (Sandbox)
             </button>
-            <div style={{ ...muted, textAlign: "center", marginTop: 8 }}>
-              🔒 Your details are used only for this demo checkout.
+            <div style={{ ...muted, textAlign: "center", marginTop: 6 }}>
+              🔒 Your details are used only for this sandbox checkout.
             </div>
           </div>
         </aside>
@@ -334,11 +322,12 @@ export default function CheckoutPage() {
 
 /* ------------------------------ Styles ------------------------------ */
 const outer: React.CSSProperties = {
-  padding: 16,
+  padding: "8px 12px",                    // less top gap
   display: "grid",
-  gap: 16,
+  gap: 12,
   background: "linear-gradient(180deg, #f8fafc, #ffffff)",
   minHeight: "100dvh",
+  fontSize: 16,                           // larger base font
 };
 
 const topbar: React.CSSProperties = {
@@ -359,8 +348,8 @@ const logoLink: React.CSSProperties = {
 };
 
 const logoMark: React.CSSProperties = {
-  width: 28,
-  height: 28,
+  width: 26,
+  height: 26,
   borderRadius: 8,
   display: "grid",
   placeItems: "center",
@@ -387,38 +376,9 @@ const secureBadge: React.CSSProperties = {
   borderRadius: 999,
 };
 
-const stepper: React.CSSProperties = {
-  maxWidth: 1200,
-  margin: "0 auto",
-  display: "flex",
-  gap: 18,
-  alignItems: "center",
-  listStyle: "none",
-  padding: 0,
-};
-const stepItem = (active: boolean): React.CSSProperties => ({
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  color: active ? "#0f172a" : "#64748b",
-  fontWeight: active ? 900 : 800,
-});
-const stepCircle = (active: boolean): React.CSSProperties => ({
-  width: 26,
-  height: 26,
-  borderRadius: 999,
-  display: "grid",
-  placeItems: "center",
-  border: active ? "none" : "1px solid #e2e8f0",
-  background: active ? "linear-gradient(90deg,#06b6d4,#0ea5e9)" : "#fff",
-  color: active ? "#fff" : "#0f172a",
-  fontWeight: 900,
-  boxShadow: active ? "0 8px 18px rgba(14,165,233,.25)" : "none",
-});
-
 const grid: React.CSSProperties = {
   display: "grid",
-  gap: 16,
+  gap: 12,
   gridTemplateColumns: "minmax(0, 1fr)",
   maxWidth: 1200,
   width: "100%",
@@ -433,11 +393,11 @@ const mediaQuery = "@media (min-width: 980px)";
 const card: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #e5e7eb",
-  borderRadius: 16,
-  padding: 16,
+  borderRadius: 14,
+  padding: 14,
   display: "grid",
-  gap: 14,
-  boxShadow: "0 8px 24px rgba(2,6,23,.06)",
+  gap: 12,
+  boxShadow: "0 6px 18px rgba(2,6,23,.06)",
 };
 
 const h1: React.CSSProperties = {
@@ -455,7 +415,7 @@ const fieldset: React.CSSProperties = {
   borderRadius: 12,
   padding: 12,
   display: "grid",
-  gap: 12,
+  gap: 10,
   background: "#fff",
 };
 const legend: React.CSSProperties = {
@@ -469,7 +429,7 @@ const label: React.CSSProperties = {
   gap: 6,
   fontWeight: 800,
   color: "#334155",
-  fontSize: 13,
+  fontSize: 14,
 };
 
 const checkLabel: React.CSSProperties = {
@@ -481,12 +441,13 @@ const checkLabel: React.CSSProperties = {
 };
 
 const input: React.CSSProperties = {
-  height: 42,
+  height: 44,
   padding: "0 12px",
   border: "1px solid #e2e8f0",
   borderRadius: 10,
   background: "#fff",
   outline: "none",
+  fontSize: 15,
 };
 
 const grid1: React.CSSProperties = { display: "grid", gap: 8, gridTemplateColumns: "1fr" };
@@ -503,7 +464,7 @@ const passengerHeader: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 10,
-  marginBottom: 8,
+  marginBottom: 6,
 };
 const pill: React.CSSProperties = {
   background: "#eef2ff",
@@ -518,7 +479,7 @@ const pill: React.CSSProperties = {
 const actions: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 12,
+  gap: 10,
   flexWrap: "wrap",
 };
 
@@ -533,14 +494,14 @@ const btnGhost: React.CSSProperties = {
 };
 
 const btnPrimary: React.CSSProperties = {
-  height: 44,
-  padding: "0 18px",
+  height: 46,
+  padding: "0 16px",
   border: "none",
   borderRadius: 12,
   fontWeight: 900,
   color: "#fff",
   background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
-  boxShadow: "0 10px 30px rgba(14,165,233,.25)",
+  boxShadow: "0 8px 24px rgba(14,165,233,.25)",
   cursor: "pointer",
 };
 const btnDisabled: React.CSSProperties = {
@@ -549,22 +510,18 @@ const btnDisabled: React.CSSProperties = {
   cursor: "not-allowed",
 };
 
-const summaryWrap: React.CSSProperties = {
-  position: "relative",
-};
-(summaryWrap as any)[mediaQuery] = {
-  position: "sticky",
-  top: 16,
-};
+const summaryWrap: React.CSSProperties = { position: "relative" };
+(summaryWrap as any)[mediaQuery] = { position: "sticky", top: 8 }; // tighter
 
 const summaryCard: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #e5e7eb",
-  borderRadius: 16,
-  padding: 16,
+  borderRadius: 14,
+  padding: 14,
   display: "grid",
-  gap: 12,
-  boxShadow: "0 8px 24px rgba(2,6,23,.06)",
+  gap: 10,
+  boxShadow: "0 6px 18px rgba(2,6,23,.06)",
+  fontSize: 15,
 };
 
 const summaryHeader: React.CSSProperties = {
@@ -574,8 +531,8 @@ const summaryHeader: React.CSSProperties = {
 };
 
 const airBadge: React.CSSProperties = {
-  width: 36,
-  height: 36,
+  width: 34,
+  height: 34,
   borderRadius: 10,
   display: "grid",
   placeItems: "center",
@@ -607,7 +564,7 @@ const metaList: React.CSSProperties = {
   margin: 0,
   paddingLeft: 16,
   display: "grid",
-  gap: 6,
+  gap: 4,
   color: "#334155",
   fontWeight: 700,
 };

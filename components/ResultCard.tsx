@@ -6,10 +6,11 @@ type Props = {
   pkg: any;
   index?: number;
   currency: string;
-  pax?: number;                              // <<< keeps pax to booking
+  pax?: number;
   comparedIds?: string[];
   onToggleCompare?: (id: string) => void;
   onSavedChangeGlobal?: (count: number) => void;
+  large?: boolean; // <<< enlarge fonts
 };
 
 export default function ResultCard({
@@ -20,6 +21,7 @@ export default function ResultCard({
   comparedIds,
   onToggleCompare,
   onSavedChangeGlobal,
+  large = false,
 }: Props) {
   const id = pkg.id || `r-${index}`;
   const airline = pkg.flight?.carrier_name || pkg.flight?.carrier || "Airline";
@@ -118,15 +120,15 @@ export default function ResultCard({
       arr.push(h);
       map.set(s, arr);
     }
-    // keep only top 3 per tier (avoid for..of on MapIterator for older targets)
     map.forEach((arr, k) => {
       map.set(k, arr.slice(0, 3));
     });
-    // sort tiers: 5★ to 3★ (use Array.from to avoid iterator issues)
     const entries: Array<[number, any[]]> = Array.from(map.entries());
     entries.sort((a, b) => b[0] - a[0]);
     return entries;
   }, [hotels]);
+
+  const fsBase = large ? 15 : 14;
 
   return (
     <article
@@ -135,20 +137,22 @@ export default function ResultCard({
         background: "#fff",
         border: "1px solid #e5e7eb",
         borderRadius: 16,
-        padding: 12,
+        padding: 14,
         display: "grid",
-        gap: 10,
+        gap: 12,
+        fontSize: fsBase,
+        boxShadow: "0 8px 24px rgba(2,6,23,.05)",
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <strong style={{ fontSize: 16 }}>{airline}</strong>
+          <strong style={{ fontSize: large ? 18 : 16 }}>{airline}</strong>
           <span style={{ opacity: 0.6 }}>•</span>
-          <span>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
+          <span style={{ fontWeight: 800 }}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {onToggleCompare && (
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 900, color: "#334155" }}>
               <input type="checkbox" checked={!!isCompared} onChange={() => onToggleCompare(id)} />
               Compare
             </label>
@@ -157,12 +161,12 @@ export default function ResultCard({
             onClick={requireLoginThenSave}
             disabled={saving}
             style={{
-              height: 32,
-              padding: "0 12px",
+              height: 34,
+              padding: "0 14px",
               borderRadius: 999,
               border: "1px solid #e2e8f0",
               background: "#fff",
-              fontWeight: 800,
+              fontWeight: 900,
             }}
           >
             {saving ? "Saving…" : "Save"}
@@ -170,9 +174,9 @@ export default function ResultCard({
         </div>
       </header>
 
-      {/* Flight summary */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontWeight: 900, fontSize: 18 }}>
+      {/* Price + booking buttons */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 900, fontSize: large ? 22 : 18 }}>
           {Math.round(Number(price))} {pkg.currency || currency}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -180,7 +184,7 @@ export default function ResultCard({
             href={gf}
             target="_blank"
             rel="noreferrer"
-            style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}
+            style={{ height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900 }}
           >
             Google Flights
           </a>
@@ -188,15 +192,15 @@ export default function ResultCard({
             href={sky}
             target="_blank"
             rel="noreferrer"
-            style={{ height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 }}
+            style={{ height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900 }}
           >
             Skyscanner
           </a>
           <button
             onClick={bookViaTripTrio}
             style={{
-              height: 32,
-              padding: "0 12px",
+              height: 34,
+              padding: "0 14px",
               borderRadius: 999,
               border: "none",
               color: "#fff",
@@ -211,7 +215,7 @@ export default function ResultCard({
 
       {/* Layovers display */}
       {Array.isArray(outSegs) && outSegs.length > 0 && (
-        <div style={{ fontSize: 13, color: "#334155" }}>
+        <div style={{ fontSize: fsBase - 1, color: "#334155" }}>
           <b>Outbound:</b>{" "}
           {outSegs.map((s: any, i: number) => {
             const segText = `${s.from} → ${s.to}`;
@@ -228,7 +232,7 @@ export default function ResultCard({
         </div>
       )}
       {Array.isArray(inSegs) && inSegs.length > 0 && (
-        <div style={{ fontSize: 13, color: "#334155" }}>
+        <div style={{ fontSize: fsBase - 1, color: "#334155" }}>
           <b>Return:</b>{" "}
           {inSegs.map((s: any, i: number) => {
             const segText = `${s.from} → ${s.to}`;
@@ -247,17 +251,17 @@ export default function ResultCard({
 
       {/* Hotels block (if present) */}
       {groupedHotels.length > 0 && (
-        <section style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8, display: "grid", gap: 8 }}>
+        <section style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "grid", gap: 8 }}>
           <div style={{ fontWeight: 900, color: "#0f172a" }}>Hotels (top 3 per star)</div>
           <div style={{ display: "grid", gap: 8 }}>
             {groupedHotels.map(([stars, arr]) => (
               <div key={String(stars)}>
-                <div style={{ fontWeight: 800, color: "#334155", marginBottom: 6 }}>{stars}★</div>
+                <div style={{ fontWeight: 900, color: "#334155", marginBottom: 6 }}>{stars}★</div>
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 8,
+                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                    gap: 10,
                   }}
                 >
                   {(arr as any[]).map((h, i) => (
@@ -269,14 +273,16 @@ export default function ResultCard({
                       style={{
                         border: "1px solid #e2e8f0",
                         borderRadius: 10,
-                        padding: 8,
+                        padding: 10,
                         textDecoration: "none",
                         color: "#0f172a",
+                        display: "grid",
+                        gap: 4,
                       }}
                     >
-                      <div style={{ fontWeight: 800 }}>{h.name}</div>
-                      <div style={{ color: "#475569", fontSize: 12 }}>
-                        {Math.round(h.price || 0)} {pkg.currency || "USD"}
+                      <div style={{ fontWeight: 900 }}>{h.name}</div>
+                      <div style={{ color: "#475569", fontSize: fsBase - 2 }}>
+                        {Math.round(h.price || 0)} {h.currency || pkg.currency || "USD"}
                       </div>
                     </a>
                   ))}

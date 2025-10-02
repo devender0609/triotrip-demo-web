@@ -63,6 +63,21 @@ function durationFromSegs(segs: any[]): number | undefined {
   return Number.isFinite(sum) ? sum : undefined;
 }
 
+/* demo hotel generator (3 per 5★/4★/3★) */
+function demoHotels(base: number, currency: string) {
+  return [
+    { name: "Grand Plaza", stars: 5, price: base * 0.9, link: "https://example.com/h1", currency },
+    { name: "City Luxe", stars: 5, price: base * 0.88, link: "https://example.com/h2", currency },
+    { name: "Royal Suites", stars: 5, price: base * 0.86, link: "https://example.com/h3", currency },
+    { name: "Metro Inn", stars: 4, price: base * 0.75, link: "https://example.com/h4", currency },
+    { name: "Garden Stay", stars: 4, price: base * 0.7, link: "https://example.com/h5", currency },
+    { name: "Harbor View", stars: 4, price: base * 0.68, link: "https://example.com/h6", currency },
+    { name: "Comfort Hub", stars: 3, price: base * 0.55, link: "https://example.com/h7", currency },
+    { name: "Central Lodge", stars: 3, price: base * 0.53, link: "https://example.com/h8", currency },
+    { name: "Airport Inn", stars: 3, price: base * 0.5, link: "https://example.com/h9", currency },
+  ];
+}
+
 /* ---------- page ---------- */
 export default function Page() {
   // origin / destination
@@ -230,12 +245,36 @@ export default function Page() {
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
 
-      // Dev/demo fallback: **12 options** so "All" visibly differs from "Top-3"
+      // ---------- DEV FALLBACKS ----------
+      // A) If backend returns some results but <=3, expand to 10 for "All"
+      if (items.length > 0 && items.length <= 3) {
+        const base = items.slice();
+        let k = 0;
+        while (items.length < 10) {
+          const src = base[k % base.length];
+          const price = Math.max(120, Math.round((src.total_cost ?? src.flight_total ?? 250) * (0.9 + (k % 6) * 0.03)));
+          const stops = Math.min(2, (src.flight?.stops ?? 0) + (k % 3));
+          items.push({
+            ...src,
+            id: `${src.id || "PKG"}-X${k + 1}`,
+            total_cost: price,
+            flight_total: price,
+            flight: {
+              ...(src.flight || {}),
+              stops,
+              price_usd: price,
+            },
+          });
+          k++;
+        }
+      }
+
+      // B) If there are NO results, fabricate 12 demo options
       if (items.length === 0) {
         const mk = (id: string, price: number, stops: number) => ({
           id,
           currency,
-          total_cost: price, // bundle == flight in demo
+          total_cost: price,
           flight_total: price,
           hotel_total: 0,
           flight: {
@@ -268,20 +307,6 @@ export default function Page() {
                 }
               : {}),
           },
-          // demo hotels (so you always see ~3 per star tier)
-          hotels: includeHotel
-            ? [
-                { name: "Grand Plaza", stars: 5, price: price * 0.9, link: "https://example.com/h1" },
-                { name: "City Luxe", stars: 5, price: price * 0.88, link: "https://example.com/h2" },
-                { name: "Royal Suites", stars: 5, price: price * 0.86, link: "https://example.com/h3" },
-                { name: "Metro Inn", stars: 4, price: price * 0.75, link: "https://example.com/h4" },
-                { name: "Garden Stay", stars: 4, price: price * 0.7, link: "https://example.com/h5" },
-                { name: "Harbor View", stars: 4, price: price * 0.68, link: "https://example.com/h6" },
-                { name: "Comfort Hub", stars: 3, price: price * 0.55, link: "https://example.com/h7" },
-                { name: "Central Lodge", stars: 3, price: price * 0.53, link: "https://example.com/h8" },
-                { name: "Airport Inn", stars: 3, price: price * 0.5, link: "https://example.com/h9" },
-              ]
-            : undefined,
         });
         items = [
           mk("DEMO-1", 268, 0), mk("DEMO-2", 219, 1), mk("DEMO-3", 279, 2),
@@ -289,6 +314,15 @@ export default function Page() {
           mk("DEMO-7", 242, 1), mk("DEMO-8", 289, 0), mk("DEMO-9", 315, 2),
           mk("DEMO-10", 226, 1), mk("DEMO-11", 274, 0), mk("DEMO-12", 299, 1),
         ];
+      }
+
+      // C) Ensure hotels appear if Include Hotel is ON (attach fallbacks when missing)
+      if (includeHotel) {
+        items = items.map((p) => {
+          if (Array.isArray(p.hotels) && p.hotels.length > 0) return p;
+          const base = num(p.total_cost) ?? num(p.flight_total) ?? num(p.flight?.price_usd) ?? 300;
+          return { ...p, hotels: demoHotels(base!, p.currency || currency) };
+        });
       }
 
       setHotelWarning(j?.hotelWarning || null);
@@ -346,7 +380,7 @@ export default function Page() {
     return items;
   }, [results, sort, sortBasis]);
 
-  // Top-3 vs All (NO slicing when showAll)
+  // Top-3 vs All
   const shownResults = useMemo(() => {
     if (!sortedResults) return null;
     return showAll ? sortedResults : sortedResults.slice(0, 3);
@@ -363,44 +397,45 @@ export default function Page() {
     [results, comparedIds]
   );
 
-  /* ---------- styles ---------- */
+  /* ---------- styles (larger fonts) ---------- */
   const s = {
     panel: {
       background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16,
-      padding: 14, display: "grid", gap: 12, maxWidth: 1240, margin: "0 auto",
+      padding: 16, display: "grid", gap: 14, maxWidth: 1240, margin: "0 auto",
+      fontSize: 15,
     } as React.CSSProperties,
-    label: { fontWeight: 800, color: "#334155", display: "block", marginBottom: 6 } as React.CSSProperties,
-    input: { height: 42, padding: "0 10px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%", background: "#fff" } as React.CSSProperties,
+    label: { fontWeight: 900, color: "#334155", display: "block", marginBottom: 6, fontSize: 14 } as React.CSSProperties,
+    input: { height: 46, padding: "0 12px", border: "1px solid #e2e8f0", borderRadius: 10, width: "100%", background: "#fff", fontSize: 15 } as React.CSSProperties,
     row: { display: "grid", gap: 12, alignItems: "end" } as React.CSSProperties,
     two: { gridTemplateColumns: "1fr 54px 1fr" } as React.CSSProperties,
-    datesPassengers: { gridTemplateColumns: "170px 1fr 1fr minmax(320px, 440px) 130px" } as React.CSSProperties,
+    datesPassengers: { gridTemplateColumns: "170px 1fr 1fr minmax(320px, 480px) 140px" } as React.CSSProperties,
     four: { gridTemplateColumns: "1fr 1fr 1fr 1fr" } as React.CSSProperties,
     three: { gridTemplateColumns: "1fr 1fr 1fr" } as React.CSSProperties,
-    paxGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(90px, 1fr))", gap: 8, alignItems: "center" } as React.CSSProperties,
-    paxLbl: { display: "block", fontSize: 12, color: "#475569", marginBottom: 4, fontWeight: 800 } as React.CSSProperties,
+    paxGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(100px, 1fr))", gap: 10, alignItems: "center" } as React.CSSProperties,
+    paxLbl: { display: "block", fontSize: 12, color: "#475569", marginBottom: 6, fontWeight: 800 } as React.CSSProperties,
     swapcell: { display: "flex", alignItems: "flex-end", justifyContent: "center" } as React.CSSProperties,
-    swap: { height: 42, width: 42, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 18 } as React.CSSProperties,
+    swap: { height: 46, width: 46, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 18 } as React.CSSProperties,
 
     toolbar: {
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 8, gap: 8, flexWrap: "wrap",
-      maxWidth: 1240, margin: "0 auto",
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 10, gap: 10, flexWrap: "wrap",
+      maxWidth: 1240, margin: "0 auto", fontSize: 15,
     } as React.CSSProperties,
-    chips: { display: "flex", gap: 8, flexWrap: "wrap" } as React.CSSProperties,
-    chip: { height: 32, padding: "0 12px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800 } as React.CSSProperties,
+    chips: { display: "flex", gap: 10, flexWrap: "wrap" } as React.CSSProperties,
+    chip: { height: 34, padding: "0 14px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 14 } as React.CSSProperties,
     chipActive: { borderColor: "#0ea5e9", boxShadow: "0 0 0 2px rgba(14,165,233,.15) inset" } as React.CSSProperties,
 
-    msg: { padding: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, maxWidth: 1240, margin: "0 auto" } as React.CSSProperties,
-    error: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 800 } as React.CSSProperties,
-    warn: { borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 700 } as React.CSSProperties,
+    msg: { padding: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, maxWidth: 1240, margin: "0 auto", fontSize: 15 } as React.CSSProperties,
+    error: { borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 900 } as React.CSSProperties,
+    warn: { borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 800 } as React.CSSProperties,
 
     comparePanel: {
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 12, maxWidth: 1240, margin: "0 auto", display: "grid", gap: 10,
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, maxWidth: 1240, margin: "0 auto", display: "grid", gap: 12, fontSize: 15,
     } as React.CSSProperties,
-    compareTable: { width: "100%", borderCollapse: "separate", borderSpacing: 0 } as React.CSSProperties,
-    thtd: { borderBottom: "1px solid #e2e8f0", padding: "8px 10px", textAlign: "left" } as React.CSSProperties,
+    compareTable: { width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 14 } as React.CSSProperties,
+    thtd: { borderBottom: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left" } as React.CSSProperties,
 
-    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 18, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
+    resultsList: { display: "grid", gridTemplateColumns: "1fr", gap: 20, maxWidth: 1240, margin: "0 auto", width: "100%" } as React.CSSProperties,
   };
 
   const globalCSS = `
@@ -411,15 +446,15 @@ export default function Page() {
 
   /* -------------------- RENDER -------------------- */
   return (
-    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+    <div style={{ padding: 12, display: "grid", gap: 14 }}>
       <style>{globalCSS}</style>
 
       {/* HERO */}
       <section>
-        <h1 style={{ margin: "0 0 6px", fontWeight: 900, fontSize: 30, letterSpacing: "-0.02em" }}>
+        <h1 style={{ margin: "0 0 6px", fontWeight: 900, fontSize: 32, letterSpacing: "-0.02em" }}>
           Find your perfect trip
         </h1>
-        <p style={{ margin: 0, display: "flex", gap: 10, alignItems: "center", color: "#334155", fontWeight: 700, flexWrap: "wrap" }}>
+        <p style={{ margin: 0, display: "flex", gap: 10, alignItems: "center", color: "#334155", fontWeight: 700, flexWrap: "wrap", fontSize: 15 }}>
           <span style={{ padding: "6px 12px", borderRadius: 999, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", fontWeight: 900 }}>
             Top-3 picks
           </span>
@@ -523,12 +558,12 @@ export default function Page() {
             </select>
           </div>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
               <input type="checkbox" checked={refundable} onChange={(e) => setRefundable(e.target.checked)} /> Refundable
             </label>
           </div>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
               <input type="checkbox" checked={greener} onChange={(e) => setGreener(e.target.checked)} /> Greener
             </label>
           </div>
@@ -579,7 +614,7 @@ export default function Page() {
         {/* Include hotel */}
         <div style={{ ...s.row, gridTemplateColumns: "170px 1fr 1fr 1fr" }}>
           <div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
               <input type="checkbox" checked={includeHotel} onChange={(e) => setIncludeHotel(e.target.checked)} /> Include hotel
             </label>
           </div>
@@ -614,25 +649,26 @@ export default function Page() {
         </div>
       </form>
 
-      {/* COMPARE PANEL — ABOVE the results */}
+      {/* COMPARE PANEL — ABOVE the results, with more details */}
       {compareMode && comparedPkgs.length >= 2 && (
         <section style={s.comparePanel} aria-live="polite">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontWeight: 900, color: "#0f172a" }}>Compare ({comparedPkgs.length} of 3)</div>
-            <button onClick={() => setComparedIds([])} style={{ ...s.chips, gap: 0 }}>
-              <span style={{ ...s.chip }}>Clear</span>
-            </button>
+            <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 18 }}>Compare ({comparedPkgs.length} of 3)</div>
+            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={s.compareTable}>
               <thead>
                 <tr>
                   <th style={s.thtd}>Airline</th>
+                  <th style={s.thtd}>Cabin</th>
+                  <th style={s.thtd}>Route</th>
                   <th style={s.thtd}>Stops</th>
                   <th style={s.thtd}>Outbound duration</th>
                   <th style={s.thtd}>Refundable</th>
                   <th style={s.thtd}>Greener</th>
-                  <th style={s.thtd}>Price (basis)</th>
+                  <th style={s.thtd}>Flight price</th>
+                  <th style={s.thtd}>Bundle total</th>
                 </tr>
               </thead>
               <tbody>
@@ -640,22 +676,27 @@ export default function Page() {
                   const airline = p.flight?.carrier_name || p.flight?.carrier || "Airline";
                   const stops = typeof p.flight?.stops === "number" ? p.flight.stops : Math.max(0, (p.flight?.segments_out?.length || 1) - 1);
                   const outDur = durationFromSegs(segsFromFlight(p.flight, "out"));
-                  const price =
-                    sortBasis === "bundle"
-                      ? (num(p.total_cost) ?? (num(p.flight_total) ?? 0) + (num(p.hotel_total) ?? 0))
-                      : (num(p.flight_total) ??
-                         num(p.total_cost_flight) ??
-                         num(p.flight?.price_usd_converted) ??
-                         num(p.flight?.price_usd) ??
-                         num(p.total_cost) ?? 0);
+                  const from = p.flight?.segments_out?.[0]?.from || p.origin || "—";
+                  const to = p.flight?.segments_out?.[p.flight?.segments_out?.length - 1]?.to || p.destination || "—";
+                  const flightOnly =
+                    num(p.flight_total) ??
+                    num(p.total_cost_flight) ??
+                    num(p.flight?.price_usd_converted) ??
+                    num(p.flight?.price_usd) ??
+                    num(p.total_cost) ?? 0;
+                  const bundle =
+                    num(p.total_cost) ?? flightOnly + (num(p.hotel_total) ?? 0);
                   return (
                     <tr key={p.id}>
                       <td style={s.thtd}>{airline}</td>
+                      <td style={s.thtd}>{p.flight?.cabin || "—"}</td>
+                      <td style={s.thtd}>{from} → {to}</td>
                       <td style={s.thtd}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</td>
                       <td style={s.thtd}>{outDur ? `${Math.floor(outDur/60)}h ${outDur%60}m` : "—"}</td>
                       <td style={s.thtd}>{p.flight?.refundable ? "Yes" : "No"}</td>
                       <td style={s.thtd}>{p.flight?.greener ? "Yes" : "—"}</td>
-                      <td style={s.thtd}>{Math.round(Number(price))} {p.currency || "USD"}</td>
+                      <td style={s.thtd}>{Math.round(Number(flightOnly))} {p.currency || "USD"}</td>
+                      <td style={s.thtd}>{Math.round(Number(bundle))} {p.currency || "USD"}</td>
                     </tr>
                   );
                 })}
@@ -684,7 +725,7 @@ export default function Page() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ ...s.chip, background: "#f1f5f9" }}>Saved: <strong>{savedCount}</strong></span>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 900, color: "#334155" }}>
             <input type="checkbox" checked={compareMode} onChange={(e) => setCompareMode(e.target.checked)} /> Compare
           </label>
         </div>
@@ -694,9 +735,6 @@ export default function Page() {
       {error && <div style={{ ...s.msg, ...s.error }} role="alert">⚠ {error}</div>}
       {hotelWarning && !error && <div style={{ ...s.msg, ...s.warn }}>ⓘ {hotelWarning}</div>}
       {loading && <div style={s.msg}>Searching…</div>}
-      {!loading && sortedResults && sortedResults.length <= 3 && (
-        <div style={s.msg}>Showing {sortedResults.length} result(s). “All” equals “Top-3” when there are only {sortedResults.length} items.</div>
-      )}
       {!loading && results && results.length === 0 && <div style={s.msg}>No results matched your filters.</div>}
 
       {/* RESULTS — row-wise list */}
@@ -708,10 +746,12 @@ export default function Page() {
               pkg={pkg}
               index={i}
               currency={currency}
-              pax={passengersTotal}
+              pax={adults + children + infants}
               comparedIds={compareMode ? comparedIds : undefined}
               onToggleCompare={compareMode ? toggleCompare : undefined}
               onSavedChangeGlobal={(count) => setSavedCount(count)}
+              // make the card fonts larger
+              large
             />
           ))}
         </div>
@@ -722,8 +762,8 @@ export default function Page() {
 
 /* small style helpers */
 const segBase: React.CSSProperties = {
-  height: 42, padding: "0 10px", borderRadius: 10, border: "1px solid #e2e8f0",
-  background: "#fff", fontWeight: 800, fontSize: 13, lineHeight: 1, whiteSpace: "nowrap"
+  height: 42, padding: "0 12px", borderRadius: 10, border: "1px solid #e2e8f0",
+  background: "#fff", fontWeight: 900, fontSize: 14, lineHeight: 1, whiteSpace: "nowrap"
 };
 function segStyle(active: boolean): React.CSSProperties {
   return active
@@ -731,6 +771,6 @@ function segStyle(active: boolean): React.CSSProperties {
     : segBase;
 }
 const primaryBtn: React.CSSProperties = {
-  height: 42, padding: "0 16px", border: "none", fontWeight: 900, color: "#fff",
-  background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 120
+  height: 46, padding: "0 18px", border: "none", fontWeight: 900, color: "#fff",
+  background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 130, fontSize: 15
 };
