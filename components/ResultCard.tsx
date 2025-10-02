@@ -8,7 +8,6 @@ type ResultCardProps = {
   currency: string;
   comparedIds?: string[];
   onToggleCompare?: (id: string) => void;
-  // optional: notify page when save list changes
   onSavedChangeGlobal?: (count: number) => void;
 };
 
@@ -45,8 +44,7 @@ function layoverMinutes(prevArrive: string, nextDepart: string) {
   const a = +new Date(prevArrive);
   const d = +new Date(nextDepart);
   if (!a || !d) return undefined;
-  const diff = Math.max(0, Math.round((d - a) / 60000));
-  return diff;
+  return Math.max(0, Math.round((d - a) / 60000));
 }
 
 function fmtCurrency(n?: number, ccy = "USD") {
@@ -62,7 +60,6 @@ function fmtCurrency(n?: number, ccy = "USD") {
 
 /** localStorage helpers for “Save” */
 const SAVED_KEY = "triptrio:saved";
-
 function readSaved(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -73,6 +70,38 @@ function readSaved(): string[] {
 }
 function writeSaved(ids: string[]) {
   localStorage.setItem(SAVED_KEY, JSON.stringify(ids));
+}
+
+/** airline url helper (basic map + fallback search) */
+function airlineHomepage(name?: string): string | null {
+  if (!name) return null;
+  const key = name.toLowerCase();
+  const map: Record<string, string> = {
+    "american": "https://www.aa.com",
+    "american airlines": "https://www.aa.com",
+    "delta": "https://www.delta.com",
+    "united": "https://www.united.com",
+    "alaska": "https://www.alaskaair.com",
+    "jetblue": "https://www.jetblue.com",
+    "spirit": "https://www.spirit.com",
+    "frontier": "https://www.flyfrontier.com",
+    "southwest": "https://www.southwest.com",
+    "air canada": "https://www.aircanada.com",
+    "lufthansa": "https://www.lufthansa.com",
+    "british airways": "https://www.britishairways.com",
+    "air france": "https://wwws.airfrance.us",
+    "klm": "https://www.klm.com",
+    "emirates": "https://www.emirates.com",
+    "qatar": "https://www.qatarairways.com",
+    "qatar airways": "https://www.qatarairways.com",
+    "singapore airlines": "https://www.singaporeair.com",
+    "turkish airlines": "https://www.turkishairlines.com",
+  };
+  for (const k of Object.keys(map)) {
+    if (key.includes(k)) return map[k];
+  }
+  // fallback: a generic search (still airline-first)
+  return `https://www.google.com/search?q=${encodeURIComponent(name + " official site booking")}`;
 }
 
 export default function ResultCard({
@@ -101,7 +130,7 @@ export default function ResultCard({
     f?.price_usd ??
     0;
 
-  /* ----- save toggle ----- */
+  /* save */
   const [isSaved, setIsSaved] = useState(false);
   useEffect(() => {
     const saved = readSaved();
@@ -114,15 +143,13 @@ export default function ResultCard({
     writeSaved(next);
     setIsSaved(next.includes(id));
     onSavedChangeGlobal?.(next.length);
-    // also emit a storage-like signal for other tabs
     window.dispatchEvent(new Event("triptrio:saved:changed"));
   }
 
-  /* ----- Compare ----- */
+  /* compare */
   const compared = comparedIds?.includes(id);
 
-  /* ----- Deeplinks ----- */
-  // Open airline direct if we know a website; otherwise Google Flights / Skyscanner
+  /* deeplinks */
   function openGoogleFlights() {
     const o = encodeURIComponent(f?.segments_out?.[0]?.from || pkg?.origin || "");
     const d = encodeURIComponent(f?.segments_out?.[0]?.to || pkg?.destination || "");
@@ -141,25 +168,23 @@ export default function ResultCard({
     window.open(`https://www.skyscanner.com/transport/flights/${route}/`, "_blank", "noopener");
   }
 
+  function openAirline() {
+    const url = airlineHomepage(airline);
+    if (url) window.open(url, "_blank", "noopener");
+  }
+
   async function bookViaTripTrio() {
+    // Use GET with query params to avoid POST edge issues in some hosts
     try {
-      const res = await fetch("/api/book", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          offer: {
-            ...pkg,
-            flight: {
-              ...f,
-              origin: f?.segments_out?.[0]?.from || pkg?.origin,
-              destination: f?.segments_out?.slice(-1)?.[0]?.to || pkg?.destination,
-            },
-            currency: pkg?.currency || currency,
-            price: price,
-          },
-          meta: { passengers: pkg?.passengers ?? 1 },
-        }),
+      const params = new URLSearchParams({
+        airline: airline,
+        origin: f?.segments_out?.[0]?.from || pkg?.origin || "",
+        destination: f?.segments_out?.slice(-1)?.[0]?.to || pkg?.destination || "",
+        currency: pkg?.currency || currency || "USD",
+        pax: String(pkg?.passengers ?? 1),
+        price: String(price || 0),
       });
+      const res = await fetch(`/api/book?${params.toString()}`, { method: "GET", cache: "no-store" });
       const j = await res.json();
       if (!res.ok || !j?.ok || !j?.bookingUrl) {
         throw new Error(j?.error || "Could not start booking");
@@ -170,33 +195,39 @@ export default function ResultCard({
     }
   }
 
-  /* ----- Segments display with layovers ----- */
   const outSegs = useMemo(() => segsFromFlight(f, "out"), [f]);
   const inSegs = useMemo(() => segsFromFlight(f, "ret"), [f]);
 
-  /* ----- styles ----- */
+  /* styles — single-row, broad card */
   const card: React.CSSProperties = {
     background: "#fff",
     border: "1px solid #e5e7eb",
     borderRadius: 16,
-    padding: 14,
+    padding: 16,
     display: "grid",
-    gap: 12,
+    gap: 14,
     boxShadow:
-      "0 1px 0 rgba(2,6,23,.04), 0 10px 20px -10px rgba(2,6,23,.15), inset 0 -1px 0 rgba(2,6,23,.02)",
+      "0 1px 0 rgba(2,6,23,.04), 0 10px 24px -12px rgba(2,6,23,.18), inset 0 -1px 0 rgba(2,6,23,.02)",
   };
   const headerRow: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 14,
+    flexWrap: "wrap",
+  };
+  const sectionTitle: React.CSSProperties = { fontWeight: 900, color: "#334155", marginTop: 2 };
+  const box: React.CSSProperties = {
+    border: "1px solid #f1f5f9",
+    background: "#f8fafc",
+    borderRadius: 12,
+    padding: 12,
+  };
+  const twoCol: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "1fr 340px",
     gap: 12,
   };
-  const airlineBadge: React.CSSProperties = {
-    fontWeight: 900,
-    fontSize: 16,
-    color: "#0f172a",
-  };
-  const tags: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
   const tag: React.CSSProperties = {
     padding: "4px 8px",
     borderRadius: 999,
@@ -212,11 +243,7 @@ export default function ResultCard({
     color: "#fff",
     border: "none",
   };
-  const priceBox: React.CSSProperties = {
-    fontWeight: 900,
-    fontSize: 20,
-    color: "#0f172a",
-  };
+  const tagRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
   const btnRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
   const btn: React.CSSProperties = {
     height: 38,
@@ -237,19 +264,16 @@ export default function ResultCard({
     border: isSaved ? "2px solid #0ea5e9" : "1px solid #e2e8f0",
     background: isSaved ? "rgba(14,165,233,.08)" : "#fff",
   };
-  const segmentRow: React.CSSProperties = {
+  const priceBox: React.CSSProperties = { fontWeight: 900, fontSize: 22, color: "#0f172a" };
+  const gridSegments: React.CSSProperties = { display: "grid", gap: 10 };
+  const seg: React.CSSProperties = {
     display: "grid",
     gap: 6,
-    gridTemplateColumns: "1fr",
-  };
-  const segment: React.CSSProperties = {
-    display: "grid",
-    gap: 6,
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "1fr auto",
     padding: "8px 10px",
     borderRadius: 12,
-    border: "1px solid #f1f5f9",
-    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    background: "#fff",
   };
   const layover: React.CSSProperties = {
     textAlign: "center",
@@ -259,25 +283,17 @@ export default function ResultCard({
 
   return (
     <div style={card}>
+      {/* HEADER */}
       <div style={headerRow}>
-        <div style={{ display: "grid", gap: 4 }}>
-          <div style={airlineBadge}>{airline}</div>
-          <div style={tags}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>{airline}</div>
+          <div style={tagRow}>
             <span style={tag}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
             {f?.cabin && <span style={tag}>{f.cabin}</span>}
             {f?.refundable ? <span style={tagGood}>Refundable</span> : null}
             {f?.greener ? <span style={tagGood}>Greener</span> : null}
-            {Array.isArray(segsFromFlight(f, "out")) && f?.duration_minutes ? (
-              <span style={tag}>{minutesToText(f.duration_minutes)}</span>
-            ) : null}
-            {typeof pkg?.hotel_total === "number" && pkg?.hotel_total > 0 ? (
-              <span style={tag}>Bundle</span>
-            ) : (
-              <span style={tag}>Flight only</span>
-            )}
           </div>
         </div>
-
         <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
           <div style={priceBox}>{fmtCurrency(price, pkg?.currency || currency)}</div>
           {onToggleCompare && (
@@ -293,123 +309,175 @@ export default function ResultCard({
         </div>
       </div>
 
-      {/* OUTBOUND */}
-      {outSegs?.length > 0 && (
-        <div style={segmentRow} aria-label="Outbound">
-          <div style={{ fontWeight: 900, color: "#334155" }}>Outbound</div>
-          {outSegs.map((s: any, i: number) => {
-            const from = s?.from || s?.departure?.iataCode || "—";
-            const to = s?.to || s?.arrival?.iataCode || "—";
-            const dt = s?.depart_time || s?.departure?.at || "";
-            const at = s?.arrive_time || s?.arrival?.at || "";
-            const dur = minutesToText(s?.duration_minutes);
-            const prev = outSegs[i - 1];
-            const lay =
-              i > 0
-                ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
-                : undefined;
+      {/* CONTENT: two columns – left flight/hotel details; right booking sections */}
+      <div style={twoCol}>
+        {/* LEFT: FLIGHT + HOTEL DETAILS */}
+        <div style={{ display: "grid", gap: 12 }}>
+          {/* FLIGHT SECTION */}
+          <div style={box}>
+            <div style={sectionTitle}>Flight</div>
+            <div style={{ height: 8 }} />
+            {/* Outbound */}
+            {outSegs?.length > 0 && (
+              <div style={gridSegments} aria-label="Outbound">
+                <div style={{ fontWeight: 800, color: "#334155" }}>Outbound</div>
+                {outSegs.map((s: any, i: number) => {
+                  const from = s?.from || s?.departure?.iataCode || "—";
+                  const to = s?.to || s?.arrival?.iataCode || "—";
+                  const dt = s?.depart_time || s?.departure?.at || "";
+                  const at = s?.arrive_time || s?.arrival?.at || "";
+                  const dur = minutesToText(s?.duration_minutes);
+                  const prev = outSegs[i - 1];
+                  const lay =
+                    i > 0
+                      ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
+                      : undefined;
 
-            return (
-              <React.Fragment key={`out-${i}`}>
-                {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
-                <div style={segment}>
-                  <div>
-                    <div style={{ fontWeight: 800 }}>{from} → {to}</div>
-                    <div style={{ color: "#64748b", fontWeight: 700 }}>
-                      {String(dt).slice(0, 16).replace("T", " ")} → {String(at).slice(0, 16).replace("T", " ")}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+                  return (
+                    <React.Fragment key={`out-${i}`}>
+                      {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
+                      <div style={seg}>
+                        <div>
+                          <div style={{ fontWeight: 800 }}>
+                            {from} → {to}
+                          </div>
+                          <div style={{ color: "#64748b", fontWeight: 700 }}>
+                            {String(dt).slice(0, 16).replace("T", " ")} →{" "}
+                            {String(at).slice(0, 16).replace("T", " ")}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            )}
+            {/* Return */}
+            {inSegs?.length > 0 && (
+              <>
+                <div style={{ height: 10 }} />
+                <div style={gridSegments} aria-label="Return">
+                  <div style={{ fontWeight: 800, color: "#334155" }}>Return</div>
+                  {inSegs.map((s: any, i: number) => {
+                    const from = s?.from || s?.departure?.iataCode || "—";
+                    const to = s?.to || s?.arrival?.iataCode || "—";
+                    const dt = s?.depart_time || s?.departure?.at || "";
+                    const at = s?.arrive_time || s?.arrival?.at || "";
+                    const dur = minutesToText(s?.duration_minutes);
+                    const prev = inSegs[i - 1];
+                    const lay =
+                      i > 0
+                        ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
+                        : undefined;
+
+                    return (
+                      <React.Fragment key={`ret-${i}`}>
+                        {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
+                        <div style={seg}>
+                          <div>
+                            <div style={{ fontWeight: 800 }}>
+                              {from} → {to}
+                            </div>
+                            <div style={{ color: "#64748b", fontWeight: 700 }}>
+                              {String(dt).slice(0, 16).replace("T", " ")} →{" "}
+                              {String(at).slice(0, 16).replace("T", " ")}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+                        </div>
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
+              </>
+            )}
+          </div>
 
-      {/* RETURN */}
-      {inSegs?.length > 0 && (
-        <div style={segmentRow} aria-label="Return">
-          <div style={{ fontWeight: 900, color: "#334155" }}>Return</div>
-          {inSegs.map((s: any, i: number) => {
-            const from = s?.from || s?.departure?.iataCode || "—";
-            const to = s?.to || s?.arrival?.iataCode || "—";
-            const dt = s?.depart_time || s?.departure?.at || "";
-            const at = s?.arrive_time || s?.arrival?.at || "";
-            const dur = minutesToText(s?.duration_minutes);
-            const prev = inSegs[i - 1];
-            const lay =
-              i > 0
-                ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
-                : undefined;
-
-            return (
-              <React.Fragment key={`ret-${i}`}>
-                {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
-                <div style={segment}>
-                  <div>
-                    <div style={{ fontWeight: 800 }}>{from} → {to}</div>
-                    <div style={{ color: "#64748b", fontWeight: 700 }}>
-                      {String(dt).slice(0, 16).replace("T", " ")} → {String(at).slice(0, 16).replace("T", " ")}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+          {/* HOTEL SECTION (if present) */}
+          {pkg?.hotel && (
+            <div style={box}>
+              <div style={sectionTitle}>Hotel</div>
+              <div style={{ height: 8 }} />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>
+                  {pkg.hotel.name} {pkg.hotel.star ? `(${Math.round(pkg.hotel.star)}★)` : ""}
                 </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
-
-      {/* HOTEL (if bundle) */}
-      {pkg?.hotel && (
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900, color: "#334155" }}>Hotel</div>
-          <div
-            style={{
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #f1f5f9",
-              background: "#f8fafc",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ fontWeight: 800 }}>
-              {pkg.hotel.name} {pkg.hotel.star ? `(${Math.round(pkg.hotel.star)}★)` : ""}
+                <div style={{ fontWeight: 900 }}>
+                  {fmtCurrency(
+                    pkg.hotel.price_converted ?? pkg.hotel.total_usd,
+                    pkg.hotel.currency || pkg.currency || "USD"
+                  )}
+                </div>
+              </div>
             </div>
-            <div style={{ fontWeight: 900 }}>
-              {fmtCurrency(
-                pkg.hotel.price_converted ?? pkg.hotel.total_usd,
-                pkg.hotel.currency || pkg.currency || "USD"
-              )}
+          )}
+        </div>
+
+        {/* RIGHT: BOOKING BOXES (flight vs hotel kept separate) */}
+        <div style={{ display: "grid", gap: 12 }}>
+          {/* FLIGHT BOOKING */}
+          <div style={box}>
+            <div style={sectionTitle}>Book Flight</div>
+            <div style={{ height: 8 }} />
+            <div style={btnRow}>
+              <button style={btnPrimary} type="button" onClick={bookViaTripTrio}>
+                Book via TripTrio
+              </button>
+              <button style={btn} type="button" onClick={openAirline}>
+                Airline site
+              </button>
+              <button style={btn} type="button" onClick={openGoogleFlights}>
+                Google Flights
+              </button>
+              <button style={btn} type="button" onClick={openSkyscanner}>
+                Skyscanner
+              </button>
+              <button
+                style={saveBtn}
+                onClick={toggleSave}
+                type="button"
+                title={isSaved ? "Remove from saved" : "Save this option"}
+              >
+                {isSaved ? "Saved ✓" : "Save"}
+              </button>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ACTIONS */}
-      <div style={btnRow}>
-        <button style={btnPrimary} onClick={bookViaTripTrio} type="button">
-          Book via TripTrio
-        </button>
-        <button style={btn} onClick={openGoogleFlights} type="button">
-          Google Flights
-        </button>
-        <button style={btn} onClick={openSkyscanner} type="button">
-          Skyscanner
-        </button>
-        <button
-          style={saveBtn}
-          onClick={toggleSave}
-          type="button"
-          title={isSaved ? "Remove from saved" : "Save this option"}
-        >
-          {isSaved ? "Saved ✓" : "Save"}
-        </button>
+          {/* HOTEL BOOKING (only if a hotel exists) */}
+          {pkg?.hotel && (
+            <div style={box}>
+              <div style={sectionTitle}>Book Hotel</div>
+              <div style={{ height: 8 }} />
+              <div style={btnRow}>
+                {pkg.hotel.deeplinks?.booking && (
+                  <a style={btn} href={pkg.hotel.deeplinks.booking} target="_blank" rel="noopener">
+                    Booking.com
+                  </a>
+                )}
+                {pkg.hotel.deeplinks?.hotels && (
+                  <a style={btn} href={pkg.hotel.deeplinks.hotels} target="_blank" rel="noopener">
+                    Hotels.com
+                  </a>
+                )}
+                {pkg.hotel.deeplinks?.expedia && (
+                  <a style={btn} href={pkg.hotel.deeplinks.expedia} target="_blank" rel="noopener">
+                    Expedia
+                  </a>
+                )}
+                {!pkg.hotel.deeplinks && <span style={{ fontWeight: 700, color: "#64748b" }}>No hotel links</span>}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
