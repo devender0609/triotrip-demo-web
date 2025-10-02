@@ -38,6 +38,9 @@ type SearchPayload = {
   maxStops?: 0 | 1 | 2;
   refundable?: boolean;
   greener?: boolean;
+
+  // optional – backend supports sorting by flight-only vs bundle
+  sortBasis?: "flightOnly" | "bundle";
 };
 
 /** Local ISO date (yyyy-mm-dd) */
@@ -136,6 +139,7 @@ export default function Page() {
 
   // sort / compare / show all
   const [sort, setSort] = useState<SortKey>("best");
+  const [sortBasis, setSortBasis] = useState<"flightOnly" | "bundle">("flightOnly");
   const [compareMode, setCompareMode] = useState(false);
   const [comparedIds, setComparedIds] = useState<string[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -247,6 +251,8 @@ export default function Page() {
         maxStops,
         refundable,
         greener,
+
+        sortBasis, // NEW: tell backend which basis to sort by
       };
 
       // Same-origin Next API route
@@ -269,6 +275,8 @@ export default function Page() {
           id,
           currency,
           total_cost: price,
+          flight_total: price, // for display
+          hotel_total: 0,
           flight: {
             carrier_name: ["United", "American", "Delta"][stops] || "United",
             cabin,
@@ -292,23 +300,12 @@ export default function Page() {
               : {}),
             duration_minutes: roundTrip ? 165 + 155 : 165,
           },
-          ...(includeHotel
-            ? {
-                hotel: {
-                  name: ["Downtown Inn", "Airport Suites", "Central Plaza"][stops] || "Downtown Inn",
-                  star: Math.max(3, minHotelStar || 4),
-                  city: destination,
-                  price_converted: 129,
-                  currency,
-                },
-              }
-            : {}),
         });
         items = [demo("DEMO-1", 268, 0), demo("DEMO-2", 219, 1), demo("DEMO-3", 279, 2)];
       }
 
       if (includeHotel && minHotelStar > 0) {
-        items = items.filter((p) => !p.hotel || Number(p.hotel.star || 0) >= minHotelStar);
+        // soft behavior is handled in API; just show what's returned
       }
       setHotelWarning(j?.hotelWarning || null);
       setResults(items);
@@ -319,11 +316,11 @@ export default function Page() {
     }
   }
 
-  // Re-run search when only the sort changes and we already have results
+  // Re-run search when only the sort or sortBasis changes and we already have results
   useEffect(() => {
     if (results) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sort]);
+  }, [sort, sortBasis]);
 
   function toggleCompare(id: string) {
     setComparedIds((prev) =>
@@ -1037,6 +1034,31 @@ export default function Page() {
             </select>
           </div>
         </div>
+
+        {/* Row: sort basis */}
+        <div className="row three">
+          <div>
+            <label>Sort by</label>
+            <div className="segbtns">
+              <button
+                type="button"
+                className={`seg ${sortBasis === "flightOnly" ? "active" : ""}`}
+                onClick={() => setSortBasis("flightOnly")}
+                title="Sort using flight price/duration only"
+              >
+                Flight only
+              </button>
+              <button
+                type="button"
+                className={`seg ${sortBasis === "bundle" ? "active" : ""}`}
+                onClick={() => setSortBasis("bundle")}
+                title="Sort using flight + hotel total"
+              >
+                Bundle total
+              </button>
+            </div>
+          </div>
+        </div>
       </form>
 
       {/* SORT / VIEW / ACTIONS */}
@@ -1093,6 +1115,53 @@ export default function Page() {
         </div>
       </div>
 
+      {/* ===================== B) COMPARE TABLE (FULL BLOCK) ===================== */}
+      {compareMode && compareCalc && compareCalc.selected.length >= 2 && (
+        <div className="panel" role="region" aria-label="Comparison table">
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Comparison</div>
+          <div className="cmp">
+            <div className="cmp-row cmp-head">
+              <div className="cmp-cell"></div>
+              {compareCalc.selected.map((p, i) => (
+                <div key={i} className="cmp-cell cmp-headcell">
+                  {p.flight?.carrier_name || p.flight?.carrier || p.id || `#${i + 1}`}
+                </div>
+              ))}
+            </div>
+
+            {compareCalc.rows.map((r) => (
+              <div key={r.key} className="cmp-row">
+                <div className="cmp-cell cmp-key">{r.label}</div>
+                {r.values.map((v, i) => {
+                  const winners = compareCalc.winners[r.key] || [];
+                  const isWin = winners.includes(i);
+                  const display = r.fmt ? r.fmt(v) : (v ?? "—");
+                  return (
+                    <div key={i} className={`cmp-cell ${isWin ? "win" : ""}`}>
+                      {display as any}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          <style jsx>{`
+            .cmp { display:grid; gap:6px; }
+            .cmp-row { display:grid; grid-template-columns: 220px repeat(${compareCalc.selected.length}, 1fr); gap:6px; }
+            .cmp-head .cmp-cell { font-weight:900; }
+            .cmp-key { font-weight:900; color:#334155; }
+            .cmp-cell { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px; font-weight:800; color:#0f172a; }
+            .cmp-headcell { text-align:center; }
+            .win { border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.12) inset; }
+            @media (max-width: 820px) {
+              .cmp-row { grid-template-columns: 160px repeat(${compareCalc.selected.length}, 1fr); }
+            }
+          `}</style>
+        </div>
+      )}
+      {/* ======================================================================= */}
+
       {/* RESULTS & MESSAGES */}
       {error && <div className="error" role="alert">⚠ {error}</div>}
       {hotelWarning && !error && <div className="warn">ⓘ {hotelWarning}</div>}
@@ -1139,8 +1208,9 @@ export default function Page() {
         .hero-badge { padding: 6px 12px; border-radius: 999px; background: linear-gradient(90deg,#06b6d4,#0ea5e9); color: #fff; font-weight: 900; }
         .dot { opacity: .6; }
 
+        /* WIDER containers (1400px) */
         .panel { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:14px; display:grid; gap:12px;
-                 max-width: 1200px; margin: 0 auto; }
+                 max-width: 1400px; margin: 0 auto; }
 
         label { font-weight:800; color:#334155; display:block; margin-bottom:6px; }
         input[type="date"], input[type="number"], input[type="text"], select {
@@ -1154,7 +1224,7 @@ export default function Page() {
         .row.dates-passengers { grid-template-columns: 170px 1fr 1fr minmax(320px, 440px) 130px; align-items:end; }
         .row.hotelRow { grid-template-columns: 170px 1fr 1fr 1fr; }
 
-        .segbtns { display: inline-flex; gap: 8px; align-items: center; }
+        .segbtns { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .seg { height:42px; padding:0 10px; border-radius:10px; border:1px solid #e2e8f0; background:#fff; font-weight:800; font-size:13px; line-height:1; white-space:nowrap; }
         .seg.active { background:linear-gradient(90deg,#06b6d4,#0ea5e9); color:#fff; border:none; }
         .tripToggle { min-width:170px; }
@@ -1179,20 +1249,21 @@ export default function Page() {
         .ck input { transform: translateY(1px); }
 
         .toolbar { display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid #e5e7eb;
-                   border-radius:16px; padding:8px; gap:8px; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
+                   border-radius:16px; padding:8px; gap:8px; flex-wrap:wrap; max-width:1400px; margin:0 auto; }
         .chips, .viewchips { display:flex; gap:8px; flex-wrap:wrap; }
         .chip { height:32px; padding:0 12px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; font-weight:800; }
         .chip.active { border-color:#0ea5e9; box-shadow:0 0 0 2px rgba(14,165,233,.15) inset; }
         .right { display:flex; align-items:center; gap:8px; }
 
-        .results { display:grid; gap:12px; max-width:1200px; margin:0 auto; }
-        .loading, .empty, .error, .warn { padding:12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; max-width:1200px; margin:0 auto; }
+        .results { display:grid; gap:14px; max-width:1400px; margin:0 auto; }
+
+        .loading, .empty, .error, .warn { padding:12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; max-width:1400px; margin:0 auto; }
         .error { border-color:#fecaca; background:#fef2f2; color:#991b1b; font-weight:800; }
         .warn { border-color:#fde68a; background:#fffbeb; color:#92400e; font-weight:700; }
 
         .comparebar { position: sticky; bottom: 8px; display:flex; gap:12px; align-items:center; justify-content:space-between;
           background:#0ea5e9; color:#fff; padding:10px 12px; border-radius:12px; box-shadow:0 10px 28px rgba(2,6,23,.25);
-          max-width:1200px; margin:0 auto; }
+          max-width:1400px; margin:0 auto; }
         .comparebar .title { font-weight:900; }
         .comparebar .ids { opacity:.9; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .comparebar .btn { height:32px; padding:0 10px; border-radius:10px; background:#fff; color:#0ea5e9; border:none; font-weight:900; }
