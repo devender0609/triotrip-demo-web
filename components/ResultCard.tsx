@@ -1,16 +1,55 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
-type Props = {
+type ResultCardProps = {
   pkg: any;
   index: number;
   currency: string;
   comparedIds?: string[];
   onToggleCompare?: (id: string) => void;
+  // optional: notify page when save list changes
+  onSavedChangeGlobal?: (count: number) => void;
 };
 
-function fmt(n?: number, ccy = "USD") {
+function minutesToText(m?: number) {
+  if (typeof m !== "number") return "—";
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h}h ${min}m`;
+}
+
+function segsFromFlight(f: any, which: "out" | "ret"): any[] {
+  if (!f) return [];
+  if (which === "out") {
+    return (
+      f?.outbound ||
+      f?.segments_out ||
+      f?.legs?.[0]?.segments ||
+      f?.itineraries?.[0]?.segments ||
+      f?.segments ||
+      []
+    );
+  } else {
+    return (
+      f?.inbound ||
+      f?.segments_in ||
+      f?.legs?.[1]?.segments ||
+      f?.itineraries?.[1]?.segments ||
+      []
+    );
+  }
+}
+
+function layoverMinutes(prevArrive: string, nextDepart: string) {
+  const a = +new Date(prevArrive);
+  const d = +new Date(nextDepart);
+  if (!a || !d) return undefined;
+  const diff = Math.max(0, Math.round((d - a) / 60000));
+  return diff;
+}
+
+function fmtCurrency(n?: number, ccy = "USD") {
   if (typeof n !== "number") return "—";
   try {
     return new Intl.NumberFormat(undefined, { style: "currency", currency: ccy }).format(
@@ -21,272 +60,357 @@ function fmt(n?: number, ccy = "USD") {
   }
 }
 
-function minutesToText(m?: number) {
-  if (typeof m !== "number") return "—";
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return `${h}h ${mm}m`;
-}
+/** localStorage helpers for “Save” */
+const SAVED_KEY = "triptrio:saved";
 
-function parseISO(s?: string): Date | null {
-  if (!s) return null;
-  const d = new Date(s);
-  return Number.isFinite(+d) ? d : null;
-}
-function diffMinutes(aISO?: string, bISO?: string): number | null {
-  const a = parseISO(aISO);
-  const b = parseISO(bISO);
-  if (!a || !b) return null;
-  return Math.max(0, Math.round((+b - +a) / 60000));
-}
-
-function yyyymmdd(s: string) {
-  // expects yyyy-mm-dd
-  return s && s.length >= 10 ? s.replaceAll("-", "") : s;
-}
-
-function googleFlightsUrl(origin: string, destination: string, departDate: string, roundTrip: boolean, returnDate?: string, curr = "USD") {
-  // Stable generic link that opens Google Flights with query
-  const q = encodeURIComponent(`flights from ${origin} to ${destination} on ${departDate}${roundTrip && returnDate ? " returning " + returnDate : ""}`);
-  return `https://www.google.com/travel/flights?hl=en-US&curr=${encodeURIComponent(curr)}&q=${q}`;
-}
-
-function skyscannerUrl(origin: string, destination: string, departDate: string, roundTrip: boolean, returnDate?: string) {
-  // Skyscanner path style uses yymmdd
-  const d = yyyymmdd(departDate).slice(2); // yymmdd
-  const r = returnDate ? yyyymmdd(returnDate).slice(2) : "";
-  if (roundTrip && r) {
-    return `https://www.skyscanner.com/transport/flights/${origin}/${destination}/${d}/${r}/?adults=1&cabinclass=economy`;
-  }
-  return `https://www.skyscanner.com/transport/flights/${origin}/${destination}/${d}/?adults=1&cabinclass=economy`;
-}
-
-async function bookViaTripTrio(pkg: any) {
-  const res = await fetch("/api/book", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ offer: pkg }),
-  });
-  const j = await res.json();
-  if (!res.ok) {
-    alert(j?.error || "Booking failed");
-    return;
-  }
-  if (j.redirectUrl) {
-    window.open(j.redirectUrl, "_blank", "noopener,noreferrer");
-  } else {
-    alert("Booking request received.");
+function readSaved(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_KEY) || "[]") || [];
+  } catch {
+    return [];
   }
 }
+function writeSaved(ids: string[]) {
+  localStorage.setItem(SAVED_KEY, JSON.stringify(ids));
+}
 
-export default function ResultCard({ pkg, index, currency, comparedIds, onToggleCompare }: Props) {
-  const f = pkg.flight || {};
-  const out = f.segments_out || f.outbound || [];
-  const back = f.segments_in || f.inbound || [];
-  const airline = f.carrier_name || f.carrier || "Airline";
-  const id = pkg.id || `f-${index}`;
-  const origin = out?.[0]?.from || "";
-  const destination = out?.[out.length - 1]?.to || "";
-  const departDate = String(out?.[0]?.depart_time || "").slice(0, 10);
-  const returnDate = String(back?.[0]?.depart_time || "").slice(0, 10);
-  const roundTrip = back && back.length > 0;
+export default function ResultCard({
+  pkg,
+  index,
+  currency,
+  comparedIds,
+  onToggleCompare,
+  onSavedChangeGlobal,
+}: ResultCardProps) {
+  const id = pkg?.id || `f-${index}`;
+  const f = pkg?.flight || {};
+  const airline = f?.carrier_name || f?.carrier || "Airline";
+  const stops =
+    typeof f?.stops === "number"
+      ? f.stops
+      : (() => {
+          const segs = segsFromFlight(f, "out");
+          return segs.length ? segs.length - 1 : 0;
+        })();
 
-  const flightTotal: number | undefined = pkg.flight_total ?? f.price_usd;
-  const hotelTotal: number | undefined = pkg.hotel_total;
-  const bundleTotal: number | undefined = pkg.total_cost;
+  const price =
+    pkg?.total_cost ??
+    pkg?.total_cost_converted ??
+    f?.price_usd_converted ??
+    f?.price_usd ??
+    0;
 
-  const airlineLink: { name: string; url: string } | null =
-    pkg?.deeplinks?.airline || f?.deeplinks?.airline || null;
+  /* ----- save toggle ----- */
+  const [isSaved, setIsSaved] = useState(false);
+  useEffect(() => {
+    const saved = readSaved();
+    setIsSaved(saved.includes(id));
+  }, [id]);
 
-  const gflight = useMemo(
-    () => googleFlightsUrl(origin, destination, departDate, !!roundTrip, returnDate, pkg.currency || currency),
-    [origin, destination, departDate, roundTrip, returnDate, currency, pkg.currency]
-  );
-  const sky = useMemo(
-    () => skyscannerUrl(origin, destination, departDate, !!roundTrip, returnDate),
-    [origin, destination, departDate, roundTrip, returnDate]
-  );
+  function toggleSave() {
+    const saved = readSaved();
+    const next = saved.includes(id) ? saved.filter((x) => x !== id) : [...saved, id];
+    writeSaved(next);
+    setIsSaved(next.includes(id));
+    onSavedChangeGlobal?.(next.length);
+    // also emit a storage-like signal for other tabs
+    window.dispatchEvent(new Event("triptrio:saved:changed"));
+  }
 
-  const checked = comparedIds?.includes(id) ?? false;
+  /* ----- Compare ----- */
+  const compared = comparedIds?.includes(id);
+
+  /* ----- Deeplinks ----- */
+  // Open airline direct if we know a website; otherwise Google Flights / Skyscanner
+  function openGoogleFlights() {
+    const o = encodeURIComponent(f?.segments_out?.[0]?.from || pkg?.origin || "");
+    const d = encodeURIComponent(f?.segments_out?.[0]?.to || pkg?.destination || "");
+    const dd = encodeURIComponent(f?.segments_out?.[0]?.depart_time?.slice(0, 10) || "");
+    const rd = encodeURIComponent(f?.segments_in?.[0]?.depart_time?.slice(0, 10) || "");
+    const rt = rd ? `${o}.${d}.${dd}*${d}.${o}.${rd}` : `${o}.${d}.${dd}`;
+    window.open(`https://www.google.com/travel/flights?q=${rt}`, "_blank", "noopener");
+  }
+
+  function openSkyscanner() {
+    const o = (f?.segments_out?.[0]?.from || pkg?.origin || "").toUpperCase();
+    const d = (f?.segments_out?.[0]?.to || pkg?.destination || "").toUpperCase();
+    const dd = (f?.segments_out?.[0]?.depart_time || "").slice(0, 10).replaceAll("-", "");
+    const rd = (f?.segments_in?.[0]?.depart_time || "").slice(0, 10).replaceAll("-", "");
+    const route = rd ? `${o}/${d}/${dd}/${rd}` : `${o}/${d}/${dd}`;
+    window.open(`https://www.skyscanner.com/transport/flights/${route}/`, "_blank", "noopener");
+  }
+
+  async function bookViaTripTrio() {
+    try {
+      const res = await fetch("/api/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offer: {
+            ...pkg,
+            flight: {
+              ...f,
+              origin: f?.segments_out?.[0]?.from || pkg?.origin,
+              destination: f?.segments_out?.slice(-1)?.[0]?.to || pkg?.destination,
+            },
+            currency: pkg?.currency || currency,
+            price: price,
+          },
+          meta: { passengers: pkg?.passengers ?? 1 },
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j?.ok || !j?.bookingUrl) {
+        throw new Error(j?.error || "Could not start booking");
+      }
+      window.open(j.bookingUrl, "_blank", "noopener");
+    } catch (e: any) {
+      alert(e?.message || "Booking failed");
+    }
+  }
+
+  /* ----- Segments display with layovers ----- */
+  const outSegs = useMemo(() => segsFromFlight(f, "out"), [f]);
+  const inSegs = useMemo(() => segsFromFlight(f, "ret"), [f]);
+
+  /* ----- styles ----- */
+  const card: React.CSSProperties = {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 16,
+    padding: 14,
+    display: "grid",
+    gap: 12,
+    boxShadow:
+      "0 1px 0 rgba(2,6,23,.04), 0 10px 20px -10px rgba(2,6,23,.15), inset 0 -1px 0 rgba(2,6,23,.02)",
+  };
+  const headerRow: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  };
+  const airlineBadge: React.CSSProperties = {
+    fontWeight: 900,
+    fontSize: 16,
+    color: "#0f172a",
+  };
+  const tags: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
+  const tag: React.CSSProperties = {
+    padding: "4px 8px",
+    borderRadius: 999,
+    border: "1px solid #e2e8f0",
+    background: "#f8fafc",
+    fontWeight: 800,
+    fontSize: 12,
+    color: "#0f172a",
+  };
+  const tagGood: React.CSSProperties = {
+    ...tag,
+    background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
+    color: "#fff",
+    border: "none",
+  };
+  const priceBox: React.CSSProperties = {
+    fontWeight: 900,
+    fontSize: 20,
+    color: "#0f172a",
+  };
+  const btnRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
+  const btn: React.CSSProperties = {
+    height: 38,
+    padding: "0 12px",
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+    background: "#fff",
+    fontWeight: 800,
+  };
+  const btnPrimary: React.CSSProperties = {
+    ...btn,
+    background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
+    border: "none",
+    color: "#fff",
+  };
+  const saveBtn: React.CSSProperties = {
+    ...btn,
+    border: isSaved ? "2px solid #0ea5e9" : "1px solid #e2e8f0",
+    background: isSaved ? "rgba(14,165,233,.08)" : "#fff",
+  };
+  const segmentRow: React.CSSProperties = {
+    display: "grid",
+    gap: 6,
+    gridTemplateColumns: "1fr",
+  };
+  const segment: React.CSSProperties = {
+    display: "grid",
+    gap: 6,
+    gridTemplateColumns: "1fr 1fr",
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid #f1f5f9",
+    background: "#f8fafc",
+  };
+  const layover: React.CSSProperties = {
+    textAlign: "center",
+    fontWeight: 800,
+    color: "#64748b",
+  };
 
   return (
-    <article className="rc">
-      <header className="rc-h">
-        <div className="rc-title">
-          <b>#{index + 1}</b> • {airline} • {f.cabin || "—"} •{" "}
-          {typeof f.stops === "number" ? (f.stops === 0 ? "Nonstop" : `${f.stops} stop${f.stops > 1 ? "s" : ""}`) : (out?.length > 1 ? `${out.length - 1} stop(s)` : "Nonstop")}
-        </div>
-
-        <div className="rc-price">
-          <div className="price-main">
-            {fmt(hotelTotal && hotelTotal > 0 ? bundleTotal : flightTotal, pkg.currency || currency)}
-          </div>
-          <div className="price-sub">
-            {hotelTotal && hotelTotal > 0 ? (
-              <>Flight {fmt(flightTotal, pkg.currency || currency)} + Hotel {fmt(hotelTotal, pkg.currency || currency)}</>
+    <div style={card}>
+      <div style={headerRow}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={airlineBadge}>{airline}</div>
+          <div style={tags}>
+            <span style={tag}>{stops === 0 ? "Nonstop" : `${stops} stop(s)`}</span>
+            {f?.cabin && <span style={tag}>{f.cabin}</span>}
+            {f?.refundable ? <span style={tagGood}>Refundable</span> : null}
+            {f?.greener ? <span style={tagGood}>Greener</span> : null}
+            {Array.isArray(segsFromFlight(f, "out")) && f?.duration_minutes ? (
+              <span style={tag}>{minutesToText(f.duration_minutes)}</span>
+            ) : null}
+            {typeof pkg?.hotel_total === "number" && pkg?.hotel_total > 0 ? (
+              <span style={tag}>Bundle</span>
             ) : (
-              <>Flight only</>
+              <span style={tag}>Flight only</span>
             )}
           </div>
         </div>
-      </header>
 
-      {/* FLIGHT block (always first) */}
-      <div className="rc-block">
-        <div className="rc-sub">Flight</div>
-
-        {/* Outbound */}
-        {Array.isArray(out) && out.length > 0 ? (
-          <ul className="rc-list">
-            {out.map((s: any, i: number) => (
-              <React.Fragment key={`out-${i}`}>
-                {i > 0 && (
-                  <li className="layover">
-                    Layover {out[i-1]?.to} • {minutesToText(diffMinutes(out[i-1]?.arrive_time, s?.depart_time) || undefined)}
-                  </li>
-                )}
-                <li>
-                  {s.from} → {s.to} • {String(s.depart_time).slice(11, 16)} →{" "}
-                  {String(s.arrive_time).slice(11, 16)} ({minutesToText(s.duration_minutes)})
-                </li>
-              </React.Fragment>
-            ))}
-          </ul>
-        ) : (
-          <div className="muted">—</div>
-        )}
-
-        {/* Return */}
-        {Array.isArray(back) && back.length > 0 && (
-          <>
-            <div className="rc-sub rc-sub2">Return</div>
-            <ul className="rc-list">
-              {back.map((s: any, i: number) => (
-                <React.Fragment key={`ret-${i}`}>
-                  {i > 0 && (
-                    <li className="layover">
-                      Layover {back[i-1]?.to} • {minutesToText(diffMinutes(back[i-1]?.arrive_time, s?.depart_time) || undefined)}
-                    </li>
-                  )}
-                  <li>
-                    {s.from} → {s.to} • {String(s.depart_time).slice(11, 16)} →{" "}
-                    {String(s.arrive_time).slice(11, 16)} ({minutesToText(s.duration_minutes)})
-                  </li>
-                </React.Fragment>
-              ))}
-            </ul>
-          </>
-        )}
+        <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+          <div style={priceBox}>{fmtCurrency(price, pkg?.currency || currency)}</div>
+          {onToggleCompare && (
+            <label style={{ fontWeight: 800, color: "#334155", display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={!!compared}
+                onChange={() => onToggleCompare(id)}
+              />
+              Compare
+            </label>
+          )}
+        </div>
       </div>
 
-      {/* HOTEL block (below flight, never side-by-side) */}
-      <div className="rc-block">
-        <div className="rc-sub">Hotel</div>
-        {pkg.hotel ? (
-          <div className="hotel">
-            <div className="h-name">
+      {/* OUTBOUND */}
+      {outSegs?.length > 0 && (
+        <div style={segmentRow} aria-label="Outbound">
+          <div style={{ fontWeight: 900, color: "#334155" }}>Outbound</div>
+          {outSegs.map((s: any, i: number) => {
+            const from = s?.from || s?.departure?.iataCode || "—";
+            const to = s?.to || s?.arrival?.iataCode || "—";
+            const dt = s?.depart_time || s?.departure?.at || "";
+            const at = s?.arrive_time || s?.arrival?.at || "";
+            const dur = minutesToText(s?.duration_minutes);
+            const prev = outSegs[i - 1];
+            const lay =
+              i > 0
+                ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
+                : undefined;
+
+            return (
+              <React.Fragment key={`out-${i}`}>
+                {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
+                <div style={segment}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{from} → {to}</div>
+                    <div style={{ color: "#64748b", fontWeight: 700 }}>
+                      {String(dt).slice(0, 16).replace("T", " ")} → {String(at).slice(0, 16).replace("T", " ")}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+
+      {/* RETURN */}
+      {inSegs?.length > 0 && (
+        <div style={segmentRow} aria-label="Return">
+          <div style={{ fontWeight: 900, color: "#334155" }}>Return</div>
+          {inSegs.map((s: any, i: number) => {
+            const from = s?.from || s?.departure?.iataCode || "—";
+            const to = s?.to || s?.arrival?.iataCode || "—";
+            const dt = s?.depart_time || s?.departure?.at || "";
+            const at = s?.arrive_time || s?.arrival?.at || "";
+            const dur = minutesToText(s?.duration_minutes);
+            const prev = inSegs[i - 1];
+            const lay =
+              i > 0
+                ? layoverMinutes(prev?.arrive_time || prev?.arrival?.at, dt)
+                : undefined;
+
+            return (
+              <React.Fragment key={`ret-${i}`}>
+                {i > 0 && <div style={layover}>Layover • {minutesToText(lay)}</div>}
+                <div style={segment}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{from} → {to}</div>
+                    <div style={{ color: "#64748b", fontWeight: 700 }}>
+                      {String(dt).slice(0, 16).replace("T", " ")} → {String(at).slice(0, 16).replace("T", " ")}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", fontWeight: 800 }}>{dur}</div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+
+      {/* HOTEL (if bundle) */}
+      {pkg?.hotel && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontWeight: 900, color: "#334155" }}>Hotel</div>
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #f1f5f9",
+              background: "#f8fafc",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontWeight: 800 }}>
               {pkg.hotel.name} {pkg.hotel.star ? `(${Math.round(pkg.hotel.star)}★)` : ""}
             </div>
-            <div className="muted">{pkg.hotel.city || ""}</div>
-
-            {pkg.hotel.filteredOutByStar && (
-              <div className="badge warn">
-                No hotel met your star filter — showing flight only
-              </div>
-            )}
-
-            {!pkg.hotel.filteredOutByStar && "price_converted" in pkg.hotel ? (
-              <div className="h-price">
-                {fmt(pkg.hotel.price_converted, pkg.hotel.currency || pkg.currency || currency)}
-              </div>
-            ) : null}
-
-            {(pkg.hotel.deeplinks?.booking ||
-              pkg.hotel.deeplinks?.hotels ||
-              pkg.hotel.deeplinks?.expedia) &&
-              !pkg.hotel.filteredOutByStar && (
-                <div className="h-links">
-                  {pkg.hotel.deeplinks?.booking && (
-                    <a href="https://www.booking.com/" target="_blank" rel="noreferrer">
-                      Booking.com
-                    </a>
-                  )}
-                  {pkg.hotel.deeplinks?.hotels && (
-                    <a href="https://www.hotels.com/" target="_blank" rel="noreferrer">
-                      Hotels.com
-                    </a>
-                  )}
-                  {pkg.hotel.deeplinks?.expedia && (
-                    <a href="https://www.expedia.com/" target="_blank" rel="noreferrer">
-                      Expedia
-                    </a>
-                  )}
-                </div>
+            <div style={{ fontWeight: 900 }}>
+              {fmtCurrency(
+                pkg.hotel.price_converted ?? pkg.hotel.total_usd,
+                pkg.hotel.currency || pkg.currency || "USD"
               )}
+            </div>
           </div>
-        ) : (
-          <div className="muted">No hotel in this bundle</div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ACTIONS */}
-      <footer className="rc-f">
-        <div className="rc-actions">
-          {airlineLink ? (
-            <a className="btn" href={airlineLink.url} target="_blank" rel="noreferrer">
-              Book on {airlineLink.name}
-            </a>
-          ) : (
-            <button className="btn" onClick={() => alert("No direct airline link available.")}>
-              Book on airline
-            </button>
-          )}
-          <a className="btn secondary" href={gflight} target="_blank" rel="noreferrer">
-            Google Flights
-          </a>
-          <a className="btn secondary" href={sky} target="_blank" rel="noreferrer">
-            Skyscanner
-          </a>
-          <button className="btn ghost" onClick={() => bookViaTripTrio(pkg)}>
-            Book via TripTrio
-          </button>
-        </div>
-
-        {onToggleCompare && (
-          <label className="ck">
-            <input type="checkbox" checked={checked} onChange={() => onToggleCompare(id)} />
-            Add to compare
-          </label>
-        )}
-      </footer>
-
-      <style jsx>{`
-        .rc { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:14px; display:grid; gap:14px; }
-        .rc-h { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-        .rc-title { font-weight:900; color:#0f172a; }
-        .rc-price { text-align:right; }
-        .price-main { font-weight:900; color:#0ea5e9; font-size:18px; }
-        .price-sub { color:#64748b; font-weight:700; font-size:12px; }
-
-        .rc-block { display:grid; gap:8px; }
-        .rc-sub { font-weight:900; color:#334155; }
-        .rc-sub2 { margin-top:6px; }
-        .rc-list { margin:0; padding-left:16px; display:grid; gap:4px; }
-        .layover { color:#0f172a; font-weight:800; list-style-type: none; margin-left:-16px; }
-        .hotel { display:grid; gap:6px; }
-        .h-name { font-weight:900; color:#0f172a; }
-        .h-price { font-weight:900; color:#059669; }
-        .h-links { display:flex; gap:10px; flex-wrap:wrap; }
-        .muted { color:#64748b; font-weight:700; }
-        .badge.warn { display:inline-block; padding:4px 8px; border-radius:999px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-weight:800; font-size:12px; }
-
-        .rc-f { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-        .rc-actions { display:flex; gap:8px; flex-wrap:wrap; }
-        .btn { height:34px; padding:0 12px; border-radius:10px; border:1px solid #0ea5e9; background:#0ea5e9; color:#fff; font-weight:900; }
-        .btn.secondary { background:#fff; color:#0ea5e9; }
-        .btn.ghost { background:#fff; color:#0f172a; border-color:#cbd5e1; }
-        .ck { display:flex; gap:8px; align-items:center; font-weight:800; color:#334155; }
-      `}</style>
-    </article>
+      <div style={btnRow}>
+        <button style={btnPrimary} onClick={bookViaTripTrio} type="button">
+          Book via TripTrio
+        </button>
+        <button style={btn} onClick={openGoogleFlights} type="button">
+          Google Flights
+        </button>
+        <button style={btn} onClick={openSkyscanner} type="button">
+          Skyscanner
+        </button>
+        <button
+          style={saveBtn}
+          onClick={toggleSave}
+          type="button"
+          title={isSaved ? "Remove from saved" : "Save this option"}
+        >
+          {isSaved ? "Saved ✓" : "Save"}
+        </button>
+      </div>
+    </div>
   );
 }
