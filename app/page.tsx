@@ -29,7 +29,7 @@ interface SearchPayload {
   minBudget?: number;
   maxBudget?: number;
   currency: string;
-  sort: SortKey;               // server can ignore (client-side sort)
+  sort: SortKey;
   maxStops?: 0 | 1 | 2;
   refundable?: boolean;
   greener?: boolean;
@@ -325,7 +325,7 @@ export default function Page() {
     const basisValue = (p: any) => (sortBasis === "bundle" ? bundleTotal(p) : flightPrice(p));
 
     if (sort === "cheapest") {
-      items.sort((a, b) => (basisValue(a)! - basisValue(b)!));
+      items.sort((a, b) => basisValue(a)! - basisValue(b)!);
     } else if (sort === "fastest") {
       items.sort((a, b) => outDur(a)! - outDur(b)!);
     } else if (sort === "flexible") {
@@ -336,6 +336,7 @@ export default function Page() {
         return basisValue(a)! - basisValue(b)!;
       });
     } else {
+      // best
       items.sort((a, b) => {
         const p = basisValue(a)! - basisValue(b)!;
         if (p !== 0) return p;
@@ -364,7 +365,6 @@ export default function Page() {
 
   /* ---------- styles ---------- */
   const s = {
-    wrap: { padding: 16, display: "grid", gap: 16 } as React.CSSProperties,
     panel: {
       background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16,
       padding: 14, display: "grid", gap: 12, maxWidth: 1240, margin: "0 auto",
@@ -407,9 +407,9 @@ export default function Page() {
     a.logo, .site-logo, a[href*="logo"], img.logo, img[alt*="TripTrio"] { text-decoration: none!important; border-bottom: 0!important; }
   `;
 
-  // passengers total for downstream components
   const passengersTotal = adults + children + infants;
 
+  /* -------------------- RENDER -------------------- */
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <style>{globalCSS}</style>
@@ -546,21 +546,33 @@ export default function Page() {
           </div>
           <div>
             <label style={s.label}>Min budget</label>
-            <input type="number" placeholder="min" min={0} style={s.input}
+            <input
+              type="number"
+              placeholder="min"
+              min={0}
+              style={s.input}
               value={minBudget === "" ? "" : String(minBudget)}
               onChange={(e) => {
                 if (e.target.value === "") return setMinBudget("");
-                const v = Number(e.target.value); setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
-              }} />
+                const v = Number(e.target.value);
+                setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }}
+            />
           </div>
           <div>
             <label style={s.label}>Max budget</label>
-            <input type="number" placeholder="max" min={0} style={s.input}
+            <input
+              type="number"
+              placeholder="max"
+              min={0}
+              style={s.input}
               value={maxBudget === "" ? "" : String(maxBudget)}
               onChange={(e) => {
                 if (e.target.value === "") return setMaxBudget("");
-                const v = Number(e.target.value); setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
-              }} />
+                const v = Number(e.target.value);
+                setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }}
+            />
           </div>
         </div>
 
@@ -602,12 +614,14 @@ export default function Page() {
         </div>
       </form>
 
-      {/* COMPARE PANEL — now ABOVE the results */}
+      {/* COMPARE PANEL — ABOVE the results */}
       {compareMode && comparedPkgs.length >= 2 && (
         <section style={s.comparePanel} aria-live="polite">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div style={{ fontWeight: 900, color: "#0f172a" }}>Compare ({comparedPkgs.length} of 3)</div>
-            <button onClick={() => setComparedIds([])} style={{ ...s.chip }}>Clear</button>
+            <button onClick={() => setComparedIds([])} style={{ ...s.chips, gap: 0 }}>
+              <span style={{ ...s.chip }}>Clear</span>
+            </button>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={s.compareTable}>
@@ -694,7 +708,7 @@ export default function Page() {
               pkg={pkg}
               index={i}
               currency={currency}
-              pax={passengersTotal}              {/* <<< pass pax to card */}
+              pax={passengersTotal}
               comparedIds={compareMode ? comparedIds : undefined}
               onToggleCompare={compareMode ? toggleCompare : undefined}
               onSavedChangeGlobal={(count) => setSavedCount(count)}
@@ -707,8 +721,16 @@ export default function Page() {
 }
 
 /* small style helpers */
-const segBase: React.CSSProperties = { height: 42, padding: "0 10px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 800, fontSize: 13, lineHeight: 1, whiteSpace: "nowrap" };
+const segBase: React.CSSProperties = {
+  height: 42, padding: "0 10px", borderRadius: 10, border: "1px solid #e2e8f0",
+  background: "#fff", fontWeight: 800, fontSize: 13, lineHeight: 1, whiteSpace: "nowrap"
+};
 function segStyle(active: boolean): React.CSSProperties {
-  return active ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" } : segBase;
+  return active
+    ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" }
+    : segBase;
 }
-const primaryBtn: React.CSSProperties = { height: 42, padding: "0 16px", border: "none", fontWeight: 900, color: "#fff", background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 120 };
+const primaryBtn: React.CSSProperties = {
+  height: 42, padding: "0 16px", border: "none", fontWeight: 900, color: "#fff",
+  background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", borderRadius: 10, minWidth: 120
+};
