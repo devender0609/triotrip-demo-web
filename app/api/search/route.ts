@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 type Cabin = "ECONOMY" | "PREMIUM_ECONOMY" | "BUSINESS" | "FIRST";
 type SortKey = "best" | "cheapest" | "fastest" | "flexible";
+type SortBasis = "flightOnly" | "bundle"; // NEW: controls sorting basis
 
 type SearchPayload = {
   origin: string;
@@ -34,6 +35,9 @@ type SearchPayload = {
   maxStops?: 0 | 1 | 2;
   refundable?: boolean;
   greener?: boolean;
+
+  // optional from UI; defaults to flightOnly if omitted
+  sortBasis?: SortBasis;
 };
 
 function assertString(v: any): v is string {
@@ -41,10 +45,6 @@ function assertString(v: any): v is string {
 }
 function num(v: any): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-function minutesToText(m?: number) {
-  if (typeof m !== "number") return "—";
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 function sumSegMinutes(segs: any[]): number {
   return segs.reduce((t, s) => t + (Number(s?.duration_minutes) || 0), 0);
@@ -57,23 +57,26 @@ function basePrice(origin: string, destination: string, date: string) {
   return 120 + (v % 160); // 120–279
 }
 
-/** crude but direct airline URLs; if deep link params aren't supported, we route to the airline's booking page */
-function airlineUrl(carrier: string, origin: string, destination: string, departDate: string, roundTrip: boolean, returnDate?: string) {
+/** crude direct airline URLs; fallback to airline homepage when no stable deep link */
+function airlineUrl(
+  carrier: string,
+  origin: string,
+  destination: string,
+  departDate: string,
+  roundTrip: boolean,
+  returnDate?: string
+) {
   const d = departDate; // yyyy-mm-dd
   const r = returnDate;
   const c = carrier.toLowerCase();
 
-  // Known patterns (not guaranteed for all locales; fallback to home booking)
   if (c.includes("united")) {
-    // https://www.united.com/en-us/flight-search
     return `https://www.united.com/en-us/flight-search?from=${origin}&to=${destination}&depDate=${d}${roundTrip && r ? `&retDate=${r}` : ""}`;
   }
   if (c.includes("american")) {
-    // https://www.aa.com/booking/find-flights
     return `https://www.aa.com/booking/find-flights?tripType=${roundTrip ? "roundTrip" : "oneWay"}&from=${origin}&to=${destination}&departDate=${d}${roundTrip && r ? `&returnDate=${r}` : ""}`;
   }
   if (c.includes("delta")) {
-    // https://www.delta.com/flight-search/book-a-flight
     return `https://www.delta.com/flight-search/book-a-flight?fromCity=${origin}&toCity=${destination}&departureDate=${d}${roundTrip && r ? `&returnDate=${r}` : ""}`;
   }
   if (c.includes("southwest")) {
@@ -85,41 +88,31 @@ function airlineUrl(carrier: string, origin: string, destination: string, depart
   if (c.includes("jetblue")) {
     return `https://www.jetblue.com/booking/flights?from=${origin}&to=${destination}&depart=${d}${roundTrip && r ? `&return=${r}` : ""}`;
   }
-  if (c.includes("air canada")) {
-    return `https://www.aircanada.com/`;// AC deeplink params are complex
-  }
-  if (c.includes("lufthansa")) {
-    return `https://www.lufthansa.com/`;// fallback
-  }
-  if (c.includes("british airways") || c === "ba" || c.includes("british")) {
-    return `https://www.britishairways.com/`;// fallback
-  }
-  if (c.includes("air india")) {
-    return `https://www.airindia.com/`;// fallback
-  }
-  // generic fallback: airline name search page (but on airline domain)
+  if (c.includes("air canada")) return `https://www.aircanada.com/`;
+  if (c.includes("lufthansa")) return `https://www.lufthansa.com/`;
+  if (c.includes("british")) return `https://www.britishairways.com/`;
+  if (c.includes("air india")) return `https://www.airindia.com/`;
   return `https://www.${carrier.replace(/\s+/g, "").toLowerCase()}.com/`;
 }
 
 function attachAirlineLink(pkg: any, p: SearchPayload) {
   const carrier = pkg?.flight?.carrier_name || pkg?.flight?.carrier;
   if (!carrier) return pkg;
-  const url = airlineUrl(carrier, p.origin, p.destination, p.departDate, p.roundTrip, p.returnDate);
-  pkg.deeplinks = {
-    ...(pkg.deeplinks || {}),
-    airline: { name: carrier, url },
-  };
-  pkg.flight.deeplinks = {
-    ...(pkg.flight.deeplinks || {}),
-    airline: { name: carrier, url },
-  };
+  const url = airlineUrl(
+    carrier,
+    p.origin,
+    p.destination,
+    p.departDate,
+    p.roundTrip,
+    p.returnDate
+  );
+  pkg.deeplinks = { ...(pkg.deeplinks || {}), airline: { name: carrier, url } };
+  pkg.flight.deeplinks = { ...(pkg.flight.deeplinks || {}), airline: { name: carrier, url } };
   return pkg;
 }
 
 function buildCandidates(p: SearchPayload) {
-  const {
-    origin, destination, departDate, returnDate, roundTrip, cabin, currency,
-  } = p;
+  const { origin, destination, departDate, returnDate, roundTrip, cabin, currency } = p;
 
   const bp = basePrice(origin, destination, departDate);
 
@@ -150,7 +143,6 @@ function buildCandidates(p: SearchPayload) {
     {
       id: "CAND-1",
       currency,
-      total_cost: Math.round(bp + 60),
       flight: {
         carrier_name: "United",
         cabin,
@@ -160,14 +152,12 @@ function buildCandidates(p: SearchPayload) {
         price_usd: Math.round(bp + 60),
         segments_out: directOut,
         ...(directIn ? { segments_in: directIn } : {}),
-        duration_minutes:
-          sumSegMinutes(directOut) + (directIn ? sumSegMinutes(directIn) : 0),
+        duration_minutes: sumSegMinutes(directOut) + (directIn ? sumSegMinutes(directIn) : 0),
       },
     },
     {
       id: "CAND-2",
       currency,
-      total_cost: Math.round(bp - 30),
       flight: {
         carrier_name: "American",
         cabin,
@@ -177,14 +167,12 @@ function buildCandidates(p: SearchPayload) {
         price_usd: Math.round(bp - 30),
         segments_out: oneStopOut,
         ...(oneStopIn ? { segments_in: oneStopIn } : {}),
-        duration_minutes:
-          sumSegMinutes(oneStopOut) + (oneStopIn ? sumSegMinutes(oneStopIn) : 0),
+        duration_minutes: sumSegMinutes(oneStopOut) + (oneStopIn ? sumSegMinutes(oneStopIn) : 0),
       },
     },
     {
       id: "CAND-3",
       currency,
-      total_cost: Math.round(bp + 10),
       flight: {
         carrier_name: "Delta",
         cabin,
@@ -194,34 +182,35 @@ function buildCandidates(p: SearchPayload) {
         price_usd: Math.round(bp + 10),
         segments_out: twoStopOut,
         ...(oneStopIn ? { segments_in: oneStopIn } : {}),
-        duration_minutes:
-          sumSegMinutes(twoStopOut) + (oneStopIn ? sumSegMinutes(oneStopIn) : 0),
+        duration_minutes: sumSegMinutes(twoStopOut) + (oneStopIn ? sumSegMinutes(oneStopIn) : 0),
       },
     },
   ];
 
+  // Add (soft) hotel data; don't remove flights if stars don't match.
   if (p.includeHotel) {
-    const star = Math.max(3, Math.min(5, (p.minHotelStar ?? 0) || 4));
-    const price = 95 + (bp % 60);
     const nights = Math.max(1, p.nights ?? 1);
+    const starTarget = p.minHotelStar ?? 0;
+    const hotelBase = 95 + (bp % 60); // per night
+
     candidates.forEach((c, i) => {
+      const offeredStar = Math.max(3, Math.min(5, starTarget || 4));
+      const meets = offeredStar >= starTarget; // always true unless starTarget > offeredStar (rare with our default)
+      const hotelPrice = hotelBase * nights;
+
       c["hotel"] = {
         name: ["Downtown Inn", "Airport Suites", "Central Plaza"][i % 3],
-        star,
+        star: offeredStar,
         city: destination,
-        price_converted: price * nights,
+        price_converted: hotelPrice,
         currency,
-        deeplinks: {
-          booking: true,
-          hotels: true,
-          expedia: true,
-        },
+        deeplinks: { booking: true, hotels: true, expedia: true },
+        ...(meets ? {} : { filteredOutByStar: true }), // mark if not meeting requested star
       };
-      c.total_cost += Math.round(price * nights);
     });
   }
 
-  // add airline direct link per candidate
+  // Attach airline links
   return candidates.map((c) => attachAirlineLink(c, p));
 }
 
@@ -229,68 +218,93 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as SearchPayload;
 
+    // Basic validation
     if (!assertString(body.origin) || !assertString(body.destination)) {
-      return NextResponse.json(
-        { error: "Origin and destination are required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Origin and destination are required." }, { status: 400 });
     }
     if (!assertString(body.departDate)) {
-      return NextResponse.json(
-        { error: "Departure date is required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Departure date is required." }, { status: 400 });
     }
     if (body.roundTrip && !assertString(body.returnDate || "")) {
-      return NextResponse.json(
-        { error: "Return date is required for round-trip." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Return date is required for round-trip." }, { status: 400 });
     }
 
-    let results = buildCandidates(body);
+    // Build candidates and compute totals with SOFT hotel effect
+    const sortBasis: SortBasis = body.sortBasis === "bundle" ? "bundle" : "flightOnly";
+    const nights = Math.max(1, body.nights ?? 1);
 
-    // user filters
+    let results = buildCandidates(body).map((c) => {
+      const flight_total = c.flight?.price_usd ?? 0;
+      let hotel_total = 0;
+
+      if (body.includeHotel && c.hotel) {
+        // If minHotelStar set and hotel below it, DO NOT add hotel cost, but keep the hotel object with a badge
+        const meets =
+          typeof body.minHotelStar === "number"
+            ? (c.hotel.star || 0) >= body.minHotelStar
+            : true;
+
+        if (meets) {
+          hotel_total = c.hotel.price_converted ?? 0;
+        } else {
+          c.hotel.filteredOutByStar = true;
+          hotel_total = 0;
+        }
+      }
+
+      const bundle_total = Math.round(flight_total + hotel_total);
+
+      return {
+        ...c,
+        // Detailed totals for UI/compare
+        flight_total,
+        hotel_total,
+        total_cost: bundle_total, // keep existing field: used by cards/compare
+        display_total: sortBasis === "bundle" ? bundle_total : flight_total, // used only for sorting
+      };
+    });
+
+    // Apply user filters that should still impact flights (but not hide airlines because of hotel)
     if (body.refundable) results = results.filter((c) => c.flight?.refundable);
     if (body.greener) results = results.filter((c) => c.flight?.greener);
     if (typeof body.maxStops === "number")
       results = results.filter((c) => (c.flight?.stops ?? 99) <= body.maxStops!);
+
+    // Budget filters—interpret as bundle budget if hotel included & counted, otherwise flight
     if (num(body.minBudget) !== undefined)
       results = results.filter((c) => c.total_cost >= (body.minBudget as number));
     if (num(body.maxBudget) !== undefined)
       results = results.filter((c) => c.total_cost <= (body.maxBudget as number));
-    if (body.includeHotel && body.minHotelStar)
-      results = results.filter((c) => !c.hotel || (c.hotel.star || 0) >= body.minHotelStar!);
 
-    // sort
-    const k = body.sort || "best";
-    if (k === "cheapest") results.sort((a, b) => a.total_cost - b.total_cost);
-    else if (k === "fastest")
+    // Sort (by requested key) but order using display_total for price-based sorts
+    const key = body.sort || "best";
+    if (key === "cheapest") {
+      results.sort((a, b) => a.display_total - b.display_total);
+    } else if (key === "fastest") {
       results.sort(
         (a, b) => (a.flight?.duration_minutes ?? 1e9) - (b.flight?.duration_minutes ?? 1e9)
       );
-    else if (k === "flexible")
+    } else if (key === "flexible") {
       results.sort((a, b) => {
         const ra = a.flight?.refundable ? 0 : 1;
         const rb = b.flight?.refundable ? 0 : 1;
         if (ra !== rb) return ra - rb;
-        return a.total_cost - b.total_cost;
+        return a.display_total - b.display_total;
       });
-    else
+    } else {
+      // "best": simple blend of price+duration; use display_total for the price portion
       results.sort((a, b) => {
-        const as = a.total_cost * 1.0 + (a.flight?.duration_minutes ?? 1e9) * 0.2;
-        const bs = b.total_cost * 1.0 + (b.flight?.duration_minutes ?? 1e9) * 0.2;
+        const as = a.display_total * 1.0 + (a.flight?.duration_minutes ?? 1e9) * 0.2;
+        const bs = b.display_total * 1.0 + (b.flight?.duration_minutes ?? 1e9) * 0.2;
         return as - bs;
       });
+    }
 
     const hotelWarning =
       body.includeHotel && !body.nights ? "Using 1 night by default for hotel pricing." : null;
 
-    return NextResponse.json({ results, hotelWarning });
+    return NextResponse.json({ results, hotelWarning, sortBasis });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Search failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Search failed" }, { status: 500 });
   }
 }

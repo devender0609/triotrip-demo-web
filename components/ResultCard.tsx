@@ -49,9 +49,13 @@ export default function ResultCard({ pkg, index, currency, comparedIds, onToggle
   const out = f.segments_out || f.outbound || [];
   const back = f.segments_in || f.inbound || [];
   const airline = f.carrier_name || f.carrier || "Airline";
-  const total = typeof pkg.total_cost === "number" ? pkg.total_cost : f.price_usd;
   const stops = typeof f.stops === "number" ? f.stops : Math.max(0, (out?.length || 1) - 1);
   const id = pkg.id || `f-${index}`;
+
+  // Totals provided by backend (flight_total is always the flight-only price)
+  const flightTotal: number | undefined = pkg.flight_total;
+  const hotelTotal: number | undefined = pkg.hotel_total;
+  const bundleTotal: number | undefined = pkg.total_cost;
 
   const airlineLink: { name: string; url: string } | null =
     pkg?.deeplinks?.airline || f?.deeplinks?.airline || null;
@@ -65,7 +69,22 @@ export default function ResultCard({ pkg, index, currency, comparedIds, onToggle
           <b>#{index + 1}</b> • {airline} • {f.cabin || "—"} •{" "}
           {stops === 0 ? "Nonstop" : `${stops} stop${stops > 1 ? "s" : ""}`}
         </div>
-        <div className="rc-price">{fmt(total, pkg.currency || currency)}</div>
+
+        <div className="rc-price">
+          {/* Show bundle price if a hotel is actually counted; otherwise show flight price */}
+          <div className="price-main">
+            {fmt(hotelTotal && hotelTotal > 0 ? bundleTotal : flightTotal, pkg.currency || currency)}
+          </div>
+          <div className="price-sub">
+            {hotelTotal && hotelTotal > 0 ? (
+              <>
+                Flight {fmt(flightTotal, pkg.currency || currency)} + Hotel {fmt(hotelTotal, pkg.currency || currency)}
+              </>
+            ) : (
+              <>Flight only</>
+            )}
+          </div>
+        </div>
       </header>
 
       <div className="rc-body">
@@ -110,14 +129,22 @@ export default function ResultCard({ pkg, index, currency, comparedIds, onToggle
                   {pkg.hotel.name} {pkg.hotel.star ? `(${Math.round(pkg.hotel.star)}★)` : ""}
                 </div>
                 <div className="muted">{pkg.hotel.city || ""}</div>
-                {"price_converted" in pkg.hotel ? (
+
+                {pkg.hotel.filteredOutByStar && (
+                  <div className="badge warn">
+                    No hotel met your star filter — showing flight only
+                  </div>
+                )}
+
+                {!pkg.hotel.filteredOutByStar && "price_converted" in pkg.hotel ? (
                   <div className="h-price">
                     {fmt(pkg.hotel.price_converted, pkg.hotel.currency || pkg.currency || currency)}
                   </div>
                 ) : null}
+
                 {(pkg.hotel.deeplinks?.booking ||
                   pkg.hotel.deeplinks?.hotels ||
-                  pkg.hotel.deeplinks?.expedia) && (
+                  pkg.hotel.deeplinks?.expedia) && !pkg.hotel.filteredOutByStar && (
                   <div className="h-links">
                     {pkg.hotel.deeplinks?.booking && (
                       <a href="https://www.booking.com/" target="_blank" rel="noreferrer">
@@ -163,11 +190,7 @@ export default function ResultCard({ pkg, index, currency, comparedIds, onToggle
 
         {onToggleCompare && (
           <label className="ck">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => onToggleCompare(id)}
-            />
+            <input type="checkbox" checked={checked} onChange={() => onToggleCompare(id)} />
             Add to compare
           </label>
         )}
@@ -177,17 +200,20 @@ export default function ResultCard({ pkg, index, currency, comparedIds, onToggle
         .rc { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:12px; display:grid; gap:10px; }
         .rc-h { display:flex; align-items:center; justify-content:space-between; gap:10px; }
         .rc-title { font-weight:900; color:#0f172a; }
-        .rc-price { font-weight:900; color:#0ea5e9; }
+        .rc-price { text-align:right; }
+        .price-main { font-weight:900; color:#0ea5e9; font-size:18px; }
+        .price-sub { color:#64748b; font-weight:700; font-size:12px; }
 
         .rc-body { display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
         .rc-col { display:grid; gap:10px; }
         .rc-sub { font-weight:900; color:#334155; margin-bottom:6px; }
         .rc-list { margin:0; padding-left:16px; }
-        .hotel { display:grid; gap:4px; }
+        .hotel { display:grid; gap:6px; }
         .h-name { font-weight:900; color:#0f172a; }
         .h-price { font-weight:900; color:#059669; }
         .h-links { display:flex; gap:10px; flex-wrap:wrap; }
         .muted { color:#64748b; font-weight:700; }
+        .badge.warn { display:inline-block; padding:4px 8px; border-radius:999px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-weight:800; font-size:12px; }
 
         .rc-f { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
         .rc-actions { display:flex; gap:8px; flex-wrap:wrap; }
