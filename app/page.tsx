@@ -2,11 +2,10 @@
 export const dynamic = "force-dynamic";
 
 import React, { useEffect, useMemo, useState } from "react";
-import ResultCard from "../components/ResultCard";
 import AirportField from "../components/AirportField";
-import jsPDF from "jspdf";
+import ResultCard from "../components/ResultCard";
 
-/* ---------------- types ---------------- */
+/* ---------- types ---------- */
 type Cabin = "ECONOMY" | "PREMIUM_ECONOMY" | "BUSINESS" | "FIRST";
 type SortKey = "best" | "cheapest" | "fastest" | "flexible";
 
@@ -42,12 +41,11 @@ interface SearchPayload {
   sortBasis?: "flightOnly" | "bundle";
 }
 
-/** Local ISO date (yyyy-mm-dd) */
+/* ---------- helpers ---------- */
 const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
   .toISOString()
   .slice(0, 10);
 
-/* helpers */
 function extractIATA(display: string): string {
   const s = String(display || "").toUpperCase().trim();
   let m = /\(([A-Z]{3})\)/.exec(s);
@@ -56,46 +54,8 @@ function extractIATA(display: string): string {
   if (m) return m[1];
   return "";
 }
-const num = (v: any): number | undefined =>
-  typeof v === "number" && Number.isFinite(v) ? v : undefined;
-const minutesToText = (m?: number) =>
-  typeof m === "number" ? `${Math.floor(m / 60)}h ${m % 60}m` : "—";
-const fmtCurrency = (n?: number, ccy = "USD") => {
-  if (typeof n !== "number") return "—";
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: ccy }).format(
-      Math.round(n)
-    );
-  } catch {
-    return `${ccy} ${Math.round(n)}`;
-  }
-};
-function sumSegMinutes(segs: any[]): number {
-  return segs.reduce((t, s) => t + (Number(s?.duration_minutes) || 0), 0);
-}
-function segsFromFlight(f: any, which: "out" | "ret"): any[] {
-  if (!f) return [];
-  if (which === "out") {
-    return (
-      f?.outbound ||
-      f?.segments_out ||
-      f?.legs?.[0]?.segments ||
-      f?.itineraries?.[0]?.segments ||
-      f?.segments ||
-      []
-    );
-  } else {
-    return (
-      f?.inbound ||
-      f?.segments_in ||
-      f?.legs?.[1]?.segments ||
-      f?.itineraries?.[1]?.segments ||
-      []
-    );
-  }
-}
 
-/* ---------------- page ---------------- */
+/* ---------- page ---------- */
 export default function Page() {
   // origin / destination
   const [originCode, setOriginCode] = useState("");
@@ -134,7 +94,7 @@ export default function Page() {
   const [sortBasis, setSortBasis] = useState<"flightOnly" | "bundle">("flightOnly");
   const [compareMode, setCompareMode] = useState(false);
   const [comparedIds, setComparedIds] = useState<string[]>([]);
-  const [showAll, setShowAll] = useState(false); // default: Top-3 (showAll=false)
+  const [showAll, setShowAll] = useState(false); // Top-3 by default (false)
 
   // results & messages
   const [loading, setLoading] = useState(false);
@@ -163,7 +123,7 @@ export default function Page() {
     };
   }, []);
 
-  /* children ages sync */
+  // sync children ages
   useEffect(() => {
     setChildrenAges((prev) => {
       const next = prev.slice(0, children);
@@ -172,6 +132,7 @@ export default function Page() {
     });
   }, [children]);
 
+  // hotel nights
   const hotelNights = useMemo(() => {
     if (!hotelCheckIn || !hotelCheckOut) return undefined;
     const inMs = +new Date(hotelCheckIn);
@@ -271,16 +232,14 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         cache: "no-store",
-        credentials: "same-origin",
       });
-
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Search failed");
 
       let items: any[] = Array.isArray(j.results) ? j.results : [];
 
+      // Friendly demo fallback so you always see results during dev
       if (items.length === 0) {
-        // fallback demo
         const demo = (id: string, price: number, stops: number) => ({
           id,
           currency,
@@ -331,7 +290,7 @@ export default function Page() {
     }
   }
 
-  // re-run search when sort toggles (server may sort)
+  // allow resorting without losing filters
   useEffect(() => {
     if (results) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,13 +302,12 @@ export default function Page() {
     );
   }
 
-  /* shownResults: Top-3 by default, all if toggled */
   const shownResults = useMemo(
     () => (results ? (showAll ? results : results.slice(0, 3)) : null),
     [results, showAll]
   );
 
-  /* ---- styles (row-wise list, broader container) ---- */
+  /* ---------- styles ---------- */
   const s = {
     wrap: { padding: 16, display: "grid", gap: 16 } as React.CSSProperties,
     panel: {
@@ -359,10 +317,15 @@ export default function Page() {
       padding: 14,
       display: "grid",
       gap: 12,
-      maxWidth: 1400,
+      maxWidth: 1240,
       margin: "0 auto",
     } as React.CSSProperties,
-    label: { fontWeight: 800, color: "#334155", display: "block", marginBottom: 6 } as React.CSSProperties,
+    label: {
+      fontWeight: 800,
+      color: "#334155",
+      display: "block",
+      marginBottom: 6,
+    } as React.CSSProperties,
     input: {
       height: 42,
       padding: "0 10px",
@@ -376,14 +339,36 @@ export default function Page() {
     datesPassengers: {
       gridTemplateColumns: "170px 1fr 1fr minmax(320px, 440px) 130px",
     } as React.CSSProperties,
-    resultsList: {
+    four: { gridTemplateColumns: "1fr 1fr 1fr 1fr" } as React.CSSProperties,
+    three: { gridTemplateColumns: "1fr 1fr 1fr" } as React.CSSProperties,
+    paxGrid: {
       display: "grid",
-      gridTemplateColumns: "1fr", // row-wise
-      gap: 18,
-      maxWidth: 1240,            // broader reading width but not full page
-      margin: "0 auto",
-      width: "100%",
+      gridTemplateColumns: "repeat(3, minmax(90px, 1fr))",
+      gap: 8,
+      alignItems: "center",
     } as React.CSSProperties,
+    paxLbl: {
+      display: "block",
+      fontSize: 12,
+      color: "#475569",
+      marginBottom: 4,
+      fontWeight: 800,
+    } as React.CSSProperties,
+    swapcell: {
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "center",
+    } as React.CSSProperties,
+    swap: {
+      height: 42,
+      width: 42,
+      borderRadius: 12,
+      border: "1px solid #e2e8f0",
+      background: "#fff",
+      cursor: "pointer",
+      fontSize: 18,
+    } as React.CSSProperties,
+
     toolbar: {
       display: "flex",
       alignItems: "center",
@@ -410,6 +395,16 @@ export default function Page() {
       borderColor: "#0ea5e9",
       boxShadow: "0 0 0 2px rgba(14,165,233,.15) inset",
     } as React.CSSProperties,
+
+    resultsList: {
+      display: "grid",
+      gridTemplateColumns: "1fr", // row-wise
+      gap: 18,
+      maxWidth: 1240,
+      margin: "0 auto",
+      width: "100%",
+    } as React.CSSProperties,
+
     msg: {
       padding: 12,
       background: "#fff",
@@ -432,11 +427,13 @@ export default function Page() {
     } as React.CSSProperties,
   };
 
-  /* logo underline removal */
   const globalCSS = `
-    a.logo, .site-logo, a[href*="logo"], img.logo, img[alt*="TripTrio"] { text-decoration: none !important; border-bottom: 0 !important; }
+    a.logo, .site-logo, a[href*="logo"], img.logo, img[alt*="TripTrio"] {
+      text-decoration: none!important; border-bottom: 0!important;
+    }
   `;
 
+  /* ---------- render ---------- */
   return (
     <div style={s.wrap}>
       <style>{globalCSS}</style>
@@ -456,7 +453,7 @@ export default function Page() {
         </p>
       </section>
 
-      {/* FORM (keep your previous inputs) */}
+      {/* FORM */}
       <form
         style={s.panel}
         onSubmit={(e) => { e.preventDefault(); runSearch(); }}
@@ -474,13 +471,8 @@ export default function Page() {
               onChangeCode={(code: string, display: string) => { setOriginCode(code); setOriginDisplay(display); }}
             />
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center" }} aria-hidden>
-            <button
-              type="button"
-              title="Swap origin & destination"
-              onClick={swapOriginDest}
-              style={{ height: 42, width: 42, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 18 }}
-            >
+          <div style={s.swapcell} aria-hidden>
+            <button type="button" title="Swap origin & destination" onClick={swapOriginDest} style={s.swap}>
               ⇄
             </button>
           </div>
@@ -497,44 +489,218 @@ export default function Page() {
           </div>
         </div>
 
-        {/* ... keep the rest of your controls: dates, passengers, cabin, budgets, hotel, sort basis ... */}
+        {/* Trip / dates / passengers / search */}
+        <div style={{ ...s.row, ...s.datesPassengers }}>
+          <div style={{ minWidth: 170 }}>
+            <label style={s.label}>Trip</label>
+            <div style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" style={segStyle(!roundTrip)} onClick={() => setRoundTrip(false)}>One-way</button>
+              <button type="button" style={segStyle(roundTrip)} onClick={() => setRoundTrip(true)}>Round-trip</button>
+            </div>
+          </div>
+
+          <div>
+            <label style={s.label}>Depart</label>
+            <input type="date" style={s.input} value={departDate}
+              onChange={(e) => setDepartDate(e.target.value)}
+              min={todayLocal} max={roundTrip && returnDate ? returnDate : undefined} />
+          </div>
+
+          <div>
+            <label style={s.label}>Return</label>
+            <input type="date" style={s.input} value={returnDate}
+              onChange={(e) => setReturnDate(e.target.value)}
+              disabled={!roundTrip}
+              min={departDate || todayLocal} />
+          </div>
+
+          <div>
+            <label style={s.label}>Passengers</label>
+            <div style={s.paxGrid}>
+              <span>
+                <span style={s.paxLbl}>Adults</span>
+                <input type="number" min={1} style={s.input} value={adults}
+                  onChange={(e) => setAdults(Math.max(1, Number(e.target.value) || 1))} />
+              </span>
+              <span>
+                <span style={s.paxLbl}>Children</span>
+                <input type="number" min={0} style={s.input} value={children}
+                  onChange={(e) => setChildren(Math.max(0, Number(e.target.value) || 0))} />
+              </span>
+              <span>
+                <span style={s.paxLbl}>Infants</span>
+                <input type="number" min={0} style={s.input} value={infants}
+                  onChange={(e) => setInfants(Math.max(0, Number(e.target.value) || 0))} />
+              </span>
+            </div>
+
+            {children > 0 && (
+              <div role="group" aria-label="Children ages" style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 800, color: "#334155", fontSize: 12, marginBottom: 6 }}>
+                  Children ages (2–17)
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 8 }}>
+                  {childrenAges.map((age, idx) => (
+                    <label key={idx}>
+                      <span style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4, fontWeight: 800 }}>
+                        Child {idx + 1}
+                      </span>
+                      <select
+                        style={s.input}
+                        value={age}
+                        onChange={(e) =>
+                          setChildrenAges((prev) => {
+                            const next = prev.slice();
+                            next[idx] = Number(e.target.value);
+                            return next;
+                          })
+                        }
+                      >
+                        {Array.from({ length: 16 }, (_, i) => 2 + i).map((a) => (
+                          <option key={a} value={a}>{a}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "end" }}>
+            <button type="submit" style={primaryBtn}>{loading ? "Searching…" : "Search"}</button>
+          </div>
+        </div>
+
+        {/* Cabin / stops / refundable / greener */}
+        <div style={{ ...s.row, ...s.four }}>
+          <div>
+            <label style={s.label}>Cabin</label>
+            <select style={s.input} value={cabin} onChange={(e) => setCabin(e.target.value as Cabin)}>
+              <option value="ECONOMY">Economy</option>
+              <option value="PREMIUM_ECONOMY">Premium Economy</option>
+              <option value="BUSINESS">Business</option>
+              <option value="FIRST">First</option>
+            </select>
+          </div>
+          <div>
+            <label style={s.label}>Stops</label>
+            <select style={s.input} value={maxStops} onChange={(e) => setMaxStops(Number(e.target.value) as 0 | 1 | 2)}>
+              <option value={0}>Nonstop</option>
+              <option value={1}>1 stop</option>
+              <option value={2}>More than 1 stop</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+              <input type="checkbox" checked={refundable} onChange={(e) => setRefundable(e.target.checked)} />
+              Refundable
+            </label>
+          </div>
+          <div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+              <input type="checkbox" checked={greener} onChange={(e) => setGreener(e.target.checked)} />
+              Greener
+            </label>
+          </div>
+        </div>
+
+        {/* Currency / budgets */}
+        <div style={{ ...s.row, ...s.three }}>
+          <div>
+            <label style={s.label}>Currency</label>
+            <select style={s.input} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              {["USD", "EUR", "GBP", "INR", "CAD", "AUD", "JPY", "SGD", "AED"].map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={s.label}>Min budget</label>
+            <input type="number" placeholder="min" min={0} style={s.input}
+              value={minBudget === "" ? "" : String(minBudget)}
+              onChange={(e) => {
+                if (e.target.value === "") return setMinBudget("");
+                const v = Number(e.target.value);
+                setMinBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }} />
+          </div>
+          <div>
+            <label style={s.label}>Max budget</label>
+            <input type="number" placeholder="max" min={0} style={s.input}
+              value={maxBudget === "" ? "" : String(maxBudget)}
+              onChange={(e) => {
+                if (e.target.value === "") return setMaxBudget("");
+                const v = Number(e.target.value);
+                setMaxBudget(Number.isFinite(v) ? Math.max(0, v) : 0);
+              }} />
+          </div>
+        </div>
+
+        {/* Include hotel */}
+        <div style={{ ...s.row, gridTemplateColumns: "170px 1fr 1fr 1fr" }}>
+          <div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
+              <input type="checkbox" checked={includeHotel} onChange={(e) => setIncludeHotel(e.target.checked)} />
+              Include hotel
+            </label>
+          </div>
+          <div>
+            <label style={s.label}>Hotel check-in</label>
+            <input type="date" style={s.input} value={hotelCheckIn}
+              onChange={(e) => setHotelCheckIn(e.target.value)}
+              disabled={!includeHotel}
+              min={departDate || todayLocal} />
+          </div>
+          <div>
+            <label style={s.label}>Hotel check-out</label>
+            <input type="date" style={s.input} value={hotelCheckOut}
+              onChange={(e) => setHotelCheckOut(e.target.value)}
+              disabled={!includeHotel}
+              min={hotelCheckIn || departDate || todayLocal} />
+          </div>
+          <div>
+            <label style={s.label}>Min hotel stars</label>
+            <select style={s.input} value={minHotelStar} onChange={(e) => setMinHotelStar(Number(e.target.value))} disabled={!includeHotel}>
+              <option value={0}>Any</option>
+              <option value={3}>3★+</option>
+              <option value={4}>4★+</option>
+              <option value={5}>5★</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Sort basis */}
+        <div style={{ ...s.row, ...s.three }}>
+          <div>
+            <label style={s.label}>Sort by</label>
+            <div style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" style={segStyle(sortBasis === "flightOnly")} onClick={() => setSortBasis("flightOnly")}>Flight only</button>
+              <button type="button" style={segStyle(sortBasis === "bundle")} onClick={() => setSortBasis("bundle")}>Bundle total</button>
+            </div>
+          </div>
+        </div>
       </form>
 
       {/* TOOLBAR */}
-      <div style={s.toolbar}>
-        <div style={s.chips} role="tablist" aria-label="Sort">
+      <div style={toolbarStyle}>
+        <div style={chips} role="tablist" aria-label="Sort">
           {(["best", "cheapest", "fastest", "flexible"] as const).map((k) => (
-            <button
-              key={k}
-              role="tab"
-              aria-selected={sort === k}
-              style={{ ...s.chip, ...(sort === k ? s.chipActive : {}) }}
-              onClick={() => setSort(k)}
-            >
+            <button key={k} role="tab" aria-selected={sort === k}
+              style={{ ...chip, ...(sort === k ? chipActive : {}) }}
+              onClick={() => setSort(k)}>
               {k === "best" ? "Best overall" : k[0].toUpperCase() + k.slice(1)}
             </button>
           ))}
         </div>
 
-        <div style={s.chips}>
-          <button
-            style={{ ...s.chip, ...(!showAll ? s.chipActive : {}) }}
-            onClick={() => setShowAll(false)}
-            title="Show top 3"
-          >
-            Top-3
-          </button>
-          <button
-            style={{ ...s.chip, ...(showAll ? s.chipActive : {}) }}
-            onClick={() => setShowAll(true)}
-            title="Show all"
-          >
-            All
-          </button>
+        <div style={chips}>
+          <button style={{ ...chip, ...(!showAll ? chipActive : {}) }} onClick={() => setShowAll(false)} title="Show top 3">Top-3</button>
+          <button style={{ ...chip, ...(showAll ? chipActive : {}) }} onClick={() => setShowAll(true)} title="Show all">All</button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ ...s.chip, background: "#f1f5f9" }}>
+          <span style={{ ...chip, background: "#f1f5f9" }}>
             Saved: <strong>{savedCount}</strong>
           </span>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#334155" }}>
@@ -550,7 +716,7 @@ export default function Page() {
       {loading && <div style={s.msg}>Searching…</div>}
       {!loading && results && results.length === 0 && <div style={s.msg}>No results matched your filters.</div>}
 
-      {/* RESULTS — ROW LIST */}
+      {/* RESULTS — row-wise list */}
       {shownResults && shownResults.length > 0 && (
         <div style={s.resultsList} id="results-root">
           {shownResults.map((pkg, i) => (
@@ -569,3 +735,57 @@ export default function Page() {
     </div>
   );
 }
+
+/* tiny style helpers */
+const segBase: React.CSSProperties = {
+  height: 42,
+  padding: "0 10px",
+  borderRadius: 10,
+  border: "1px solid #e2e8f0",
+  background: "#fff",
+  fontWeight: 800,
+  fontSize: 13,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+};
+function segStyle(active: boolean): React.CSSProperties {
+  return active
+    ? { ...segBase, background: "linear-gradient(90deg,#06b6d4,#0ea5e9)", color: "#fff", border: "none" }
+    : segBase;
+}
+const primaryBtn: React.CSSProperties = {
+  height: 42,
+  padding: "0 16px",
+  border: "none",
+  fontWeight: 900,
+  color: "#fff",
+  background: "linear-gradient(90deg,#06b6d4,#0ea5e9)",
+  borderRadius: 10,
+  minWidth: 120,
+};
+const toolbarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 8,
+  gap: 8,
+  flexWrap: "wrap",
+  maxWidth: 1240,
+  margin: "0 auto",
+};
+const chips: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
+const chip: React.CSSProperties = {
+  height: 32,
+  padding: "0 12px",
+  borderRadius: 999,
+  border: "1px solid #e2e8f0",
+  background: "#fff",
+  fontWeight: 800,
+};
+const chipActive: React.CSSProperties = {
+  borderColor: "#0ea5e9",
+  boxShadow: "0 0 0 2px rgba(14,165,233,.15) inset",
+};
