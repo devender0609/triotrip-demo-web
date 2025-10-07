@@ -1,6 +1,5 @@
 ﻿"use client";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -72,7 +71,7 @@ function CheckoutInner() {
 
       <h1 className="text-3xl font-semibold mb-1">Passenger details</h1>
       <p className="text-gray-600 mb-6">
-        {from && to ? `${from} → ${to}` : ""} {out ? ` • Depart ${out}` : ""} {ret ? ` • Return ${ret}` : ""}
+        {from && to ? `${from} → ${to}` : ""}{out ? ` • Depart ${out}` : ""}{ret ? ` • Return ${ret}` : ""}
       </p>
 
       <section className="rounded-2xl border p-4 md:p-6 mb-6">
