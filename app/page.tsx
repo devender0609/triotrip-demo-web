@@ -1,435 +1,419 @@
 "use client";
-export const dynamic = "force-dynamic";
 
-import React, { useMemo, useState } from "react";
-import AirportField from "../components/AirportField";
+import React, { useCallback, useMemo, useState } from "react";
 import ResultCard from "../components/ResultCard";
+import AirportField from "../components/AirportField";
 
-/* ---------- UI helpers ---------- */
-const chipBase: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "8px 12px",
-  border: "1px solid #e2e8f0",
-  borderRadius: 999,
-  background: "#ffffff",
-  fontWeight: 800,
-  textDecoration: "none",
-  whiteSpace: "nowrap",
-};
-const chipActive: React.CSSProperties = {
-  background: "#0ea5e9",
-  borderColor: "#0ea5e9",
-  color: "#fff",
-};
-const inputCls =
-  "w-full border rounded-lg px-3 py-2 font-semibold text-slate-900 border-slate-200 focus:border-sky-300 focus:outline-none";
-
-/* ---------- types & helpers ---------- */
 type Cabin = "ECONOMY" | "PREMIUM_ECONOMY" | "BUSINESS" | "FIRST";
+type SortKey = "best" | "cheapest" | "fastest" | "flexible";
 
-function iataOnly(s: string) {
-  if (!s) return "";
-  const m1 = /\(([A-Z]{3})\)/.exec(s);
-  if (m1) return m1[1];
-  const m2 = /^([A-Z]{3})\b/.exec(s);
-  if (m2) return m2[1];
-  return s.slice(0, 3).toUpperCase();
-}
+type SearchPayload = {
+  origin: string;
+  destination: string;
+  departDate: string;
+  returnDate?: string;
+  roundTrip: boolean;
+
+  adults: number;
+  children: number;
+  infants: number;
+
+  cabin: Cabin;
+  stops: "nonstop" | "1" | "2plus" | "any";
+  refundable: boolean;
+  greener: boolean;
+
+  currency: string;
+  minBudget?: number | "";
+  maxBudget?: number | "";
+
+  includeHotel: boolean;
+  hotelCheckIn?: string;
+  hotelCheckOut?: string;
+  minHotelStar?: number | "Any";
+};
 
 export default function Page() {
-  // core search state
-  const [originCode, setOriginCode] = useState("");
-  const [destCode, setDestCode] = useState("");
-  const [originDisplay, setOriginDisplay] = useState("");
-  const [destDisplay, setDestDisplay] = useState("");
+  // ---------- form state (EMPTY BY DEFAULT) ----------
+  const [payload, setPayload] = useState<SearchPayload>({
+    origin: "",
+    destination: "",
+    departDate: "",
+    returnDate: "",
+    roundTrip: true,
+    adults: 1,
+    children: 0,
+    infants: 0,
+    cabin: "ECONOMY",
+    stops: "any",
+    refundable: false,
+    greener: false,
+    currency: "USD",
+    minBudget: "",
+    maxBudget: "",
+    includeHotel: false,
+    hotelCheckIn: "",
+    hotelCheckOut: "",
+    minHotelStar: "Any",
+  });
 
-  const [roundTrip, setRoundTrip] = useState(true);
-  const [depart, setDepart] = useState("");
-  const [ret, setRet] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [sort, setSort] = useState<SortKey>("best");
+  const [basis, setBasis] = useState<"flight" | "bundle">("flight");
+  const [compareMode, setCompareMode] = useState(true);
 
-  const [adults, setAdults] = useState(1);
-  const [children, setChildren] = useState(0);
-  const [infants, setInfants] = useState(0);
+  // ---------- handlers ----------
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setHasSearched(true);
 
-  const [cabin, setCabin] = useState<Cabin>("ECONOMY");
-  const [stops, setStops] = useState<0 | 1 | 2 | 3>(3);
-  const [refundable, setRefundable] = useState(false);
-  const [greener, setGreener] = useState(false);
+    // TODO: replace with your real API call
+    // const res = await fetch("/api/search", { method: "POST", body: JSON.stringify(payload) });
+    // const data = await res.json();
+    // setResults(data.items);
 
-  const [currency, setCurrency] = useState("USD");
-  const [minBudget, setMinBudget] = useState("");
-  const [maxBudget, setMaxBudget] = useState("");
+    // Temporary: no auto-demo data on first load
+    setResults([]); // keep empty until your API returns
+    setIsLoading(false);
+  };
 
-  const [includeHotel, setIncludeHotel] = useState(false);
-  const [hotelIn, setHotelIn] = useState("");
-  const [hotelOut, setHotelOut] = useState("");
-  const [minStars, setMinStars] = useState("");
+  const disabledSearch = useMemo(() => {
+    if (!payload.origin || !payload.destination || !payload.departDate) return true;
+    if (payload.roundTrip && !payload.returnDate) return true;
+    return false;
+  }, [payload]);
 
-  const [mode, setMode] = useState<"top3" | "all">("top3");
-  const [compare, setCompare] = useState(false); // master compare toggle
-  const [saved, setSaved] = useState<string[]>(["demo1", "demo2"]);
-
-  const passengersTotal = adults + children + infants;
-
-  // demo results (kept simple and stable)
-  const results = useMemo(() => {
-    const mkSeg = (from: string, to: string, dur: number, iso: string) => ({
-      from,
-      to,
-      duration_minutes: dur,
-      depart_time: iso,
-    });
-
-    const outSegs = [
-      mkSeg(originCode || "AUS", "ORD", 160, (depart || "2025-10-15") + "T08:20:00Z"),
-      mkSeg("ORD", destCode || "DEL", 520, (depart || "2025-10-15") + "T12:40:00Z"),
-    ];
-
-    const inSegs = roundTrip
-      ? [
-          mkSeg(destCode || "DEL", "FRA", 460, (ret || "2025-12-04") + "T13:00:00Z"),
-          mkSeg("FRA", originCode || "AUS", 600, (ret || "2025-12-04") + "T21:15:00Z"),
-        ]
-      : [];
-
-    return Array.from({ length: 3 }).map((_, i) => ({
-      id: `pkg_${i + 1}`,
-      airline_name: i % 2 ? "United" : "Delta",
-      airline_code: i % 2 ? "UA" : "DL",
-      origin: (originCode || "AUS").toUpperCase(),
-      destination: (destCode || "DEL").toUpperCase(),
-      departDate: depart || "2025-10-15",
-      returnDate: roundTrip ? ret || "2025-12-04" : "",
-      roundTrip,
-      passengersAdults: adults,
-      currency,
-      greener: i % 2 === 0,
-      refundable: i % 3 === 0,
-      flight: {
-        segments_out: outSegs,
-        segments_in: inSegs,
-        price_usd: 900 + i * 30,
-        stops: outSegs.length - 1,
-      },
-      hotels: includeHotel
-        ? [
-            { name: "Grand Plaza", stars: 4, price: 160 + i * 5, currency },
-            { name: "Oberoi", stars: 5, price: 300 + i * 5, currency },
-            { name: "City Inn", stars: 3, price: 110 + i * 5, currency },
-          ]
-        : [],
-    }));
-  }, [originCode, destCode, depart, ret, roundTrip, adults, currency, includeHotel]);
-
-  const visible = mode === "top3" ? results.slice(0, 3) : results;
-
-  function swapAirports() {
-    const oCode = originCode;
-    const oDisp = originDisplay;
-    setOriginCode(destCode);
-    setOriginDisplay(destDisplay);
-    setDestCode(oCode);
-    setDestDisplay(oDisp);
-  }
+  // ---------- helpers ----------
+  const setField = <K extends keyof SearchPayload>(k: K, v: SearchPayload[K]) =>
+    setPayload((p) => ({ ...p, [k]: v }));
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-6">
-      <h1 className="text-3xl font-extrabold mb-3">Find your perfect trip</h1>
+    <main className="max-w-6xl mx-auto px-4 pb-16">
+      <header className="flex items-center justify-between py-5">
+        <a className="text-2xl font-semibold hover:underline" href="/">
+          TripTrio
+        </a>
+        <nav className="flex items-center gap-6 text-sm">
+          <a className="hover:underline" href="#">Saved</a>
+          <a className="hover:underline" href="#">Login</a>
+        </nav>
+      </header>
 
-      {/* badges */}
-      <div className="mb-3 flex gap-2">
-        <span style={{ ...chipBase, background: "#e0f2fe", borderColor: "#7dd3fc", color: "#0369a1" }}>Top-3 picks</span>
-        <span style={chipBase}>Smarter</span>
-        <span style={chipBase}>Clearer</span>
-        <span style={chipBase}>Bookable</span>
+      <h1 className="text-4xl font-semibold mb-6">Find your perfect trip</h1>
+
+      {/* chips */}
+      <div className="flex gap-2 mb-6">
+        {["Top-3 picks", "Smarter", "Clearer", "Bookable"].map((t) => (
+          <span key={t} className="px-3 py-1 rounded-full border text-sm">{t}</span>
+        ))}
       </div>
 
-      {/* search card */}
-      <section className="rounded-2xl border bg-white p-4 mb-4">
-        {/* Origin / Destination */}
-        <div className="grid md:grid-cols-[1fr_auto_1fr] gap-3">
+      {/* ======= SEARCH FORM (Figure 2 layout) ======= */}
+      <form onSubmit={onSubmit} className="rounded-2xl border p-4 md:p-6 space-y-4">
+        {/* Row 1: Origin / Destination */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Origin</div>
+            <label className="block text-sm font-semibold mb-1">Origin</label>
             <AirportField
-              id="origin"
-              label="Origin"
-              code={originCode}
-              initialDisplay={originDisplay}
-              onTextChange={setOriginDisplay}
-              onChangeCode={(code: string, display: string) => {
-                setOriginCode(iataOnly(code));
-                setOriginDisplay(display || code);
-              }}
+              value={payload.origin}
+              onChange={(v) => setField("origin", v)}
+              placeholder="City, airport or code"
             />
           </div>
-
-          <div className="flex items-end justify-center md:pb-0 pb-2">
-            <button className="btn small" title="Swap" onClick={swapAirports}>↔</button>
-          </div>
-
           <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Destination</div>
+            <label className="block text-sm font-semibold mb-1">Destination</label>
             <AirportField
-              id="destination"
-              label="Destination"
-              code={destCode}
-              initialDisplay={destDisplay}
-              onTextChange={setDestDisplay}
-              onChangeCode={(code: string, display: string) => {
-                setDestCode(iataOnly(code));
-                setDestDisplay(display || code);
-              }}
+              value={payload.destination}
+              onChange={(v) => setField("destination", v)}
+              placeholder="City, airport or code"
             />
           </div>
         </div>
 
-        {/* Trip + dates + pax + search (one row on md+) */}
-        <div className="mt-4 grid md:grid-cols-[auto_1fr_1fr_auto] gap-3">
+        {/* Row 2: Trip / Dates / Passengers / Search */}
+        <div className="grid grid-cols-1 md:grid-cols-[auto,1fr,1fr,auto,auto,auto] gap-4 items-end">
+          {/* Trip */}
           <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Trip</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "nowrap" }}>
-              <button style={{ ...chipBase, ...(!roundTrip ? chipActive : {}) }} onClick={() => setRoundTrip(false)}>
+            <label className="block text-sm font-semibold mb-1">Trip</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setField("roundTrip", false)}
+                className={`px-3 py-2 rounded-lg border ${!payload.roundTrip ? "bg-cyan-500 text-white" : ""}`}
+              >
                 One-way
               </button>
-              <button style={{ ...chipBase, ...(roundTrip ? chipActive : {}) }} onClick={() => setRoundTrip(true)}>
+              <button
+                type="button"
+                onClick={() => setField("roundTrip", true)}
+                className={`px-3 py-2 rounded-lg border ${payload.roundTrip ? "bg-cyan-500 text-white" : ""}`}
+              >
                 Round-trip
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Depart</div>
-              <input className={inputCls} type="date" value={depart} onChange={(e) => setDepart(e.target.value)} />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Return</div>
-              <input
-                className={`${inputCls} disabled:bg-slate-50`}
-                type="date"
-                disabled={!roundTrip}
-                value={ret}
-                onChange={(e) => setRet(e.target.value)}
-              />
-            </div>
+          {/* Depart / Return */}
+          <div>
+            <label className="block text-sm font-semibold mb-1">Depart</label>
+            <input
+              type="date"
+              value={payload.departDate}
+              onChange={(e) => setField("departDate", e.target.value)}
+              className="w-full rounded-lg border px-3 py-2"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">Return</label>
+            <input
+              type="date"
+              value={payload.returnDate}
+              onChange={(e) => setField("returnDate", e.target.value)}
+              disabled={!payload.roundTrip}
+              className="w-full rounded-lg border px-3 py-2 disabled:bg-gray-100"
+            />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Adults</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={1}
-                value={adults}
-                onChange={(e) => setAdults(Math.max(1, Number(e.target.value || 1)))}
-              />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Children</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={0}
-                value={children}
-                onChange={(e) => setChildren(Math.max(0, Number(e.target.value || 0)))}
-              />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Infants</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={0}
-                value={infants}
-                onChange={(e) => setInfants(Math.max(0, Number(e.target.value || 0)))}
-              />
-            </div>
+          {/* Passengers */}
+          <div>
+            <label className="block text-sm font-semibold mb-1">Adults</label>
+            <input
+              type="number"
+              min={1}
+              value={payload.adults}
+              onChange={(e) => setField("adults", Number(e.target.value || 0))}
+              className="w-24 rounded-lg border px-3 py-2"
+            />
           </div>
-
-          <div className="flex items-end">
-            <button style={{ ...chipBase, ...chipActive, padding: "10px 18px", borderRadius: 12 }}>
-              Search
+          <div>
+            <label className="block text-sm font-semibold mb-1">Children</label>
+            <input
+              type="number"
+              min={0}
+              value={payload.children}
+              onChange={(e) => setField("children", Number(e.target.value || 0))}
+              className="w-24 rounded-lg border px-3 py-2"
+            />
+          </div>
+          <div className="md:justify-self-end">
+            <button
+              type="submit"
+              disabled={disabledSearch || isLoading}
+              className="px-5 py-2 rounded-lg bg-cyan-600 text-white disabled:opacity-50"
+            >
+              {isLoading ? "Searching…" : "Search"}
             </button>
           </div>
         </div>
 
-        {/* Cabin / Stops / Flags */}
-        <div className="mt-4 grid md:grid-cols-2 gap-3">
+        {/* Row 3: Cabin / Stops / Flags / Currency / Budgets */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Cabin</div>
-            <select className={inputCls} value={cabin} onChange={(e) => setCabin(e.target.value as Cabin)}>
+            <label className="block text-sm font-semibold mb-1">Cabin</label>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={payload.cabin}
+              onChange={(e) => setField("cabin", e.target.value as Cabin)}
+            >
               <option value="ECONOMY">Economy</option>
-              <option value="PREMIUM_ECONOMY">Premium Economy</option>
+              <option value="PREMIUM_ECONOMY">Premium economy</option>
               <option value="BUSINESS">Business</option>
               <option value="FIRST">First</option>
             </select>
           </div>
-          <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Stops</div>
-              <select
-                className={inputCls}
-                value={String(stops)}
-                onChange={(e) => setStops(Number(e.target.value) as 0 | 1 | 2 | 3)}
-              >
-                <option value="0">Non-stop</option>
-                <option value="1">1 stop</option>
-                <option value="2">2 stops</option>
-                <option value="3">More than 1 stop</option>
-              </select>
-            </div>
-            <label className="flex items-center gap-2 font-semibold text-slate-700">
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Stops</label>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={payload.stops}
+              onChange={(e) => setField("stops", e.target.value as SearchPayload["stops"])}
+            >
+              <option value="any">More than 1 stop</option>
+              <option value="nonstop">Nonstop only</option>
+              <option value="1">1 stop</option>
+              <option value="2plus">2+ stops</option>
+            </select>
+          </div>
+
+          <div className="flex items-end gap-6">
+            <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={refundable}
-                onChange={(e) => setRefundable(e.target.checked)}
+                checked={payload.refundable}
+                onChange={(e) => setField("refundable", e.target.checked)}
               />
-              Refundable
+              <span>Refundable</span>
             </label>
-            <label className="flex items-center gap-2 font-semibold text-slate-700">
+            <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={greener}
-                onChange={(e) => setGreener(e.target.checked)}
+                checked={payload.greener}
+                onChange={(e) => setField("greener", e.target.checked)}
               />
-              Greener
+              <span>Greener</span>
             </label>
           </div>
-        </div>
 
-        {/* Currency / Budgets */}
-        <div className="mt-4 grid md:grid-cols-3 gap-3">
           <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Currency</div>
-            <select className={inputCls} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <label className="block text-sm font-semibold mb-1">Currency</label>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={payload.currency}
+              onChange={(e) => setField("currency", e.target.value)}
+            >
               <option>USD</option>
               <option>EUR</option>
               <option>INR</option>
             </select>
           </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Min budget</div>
-            <input
-              className={inputCls}
-              placeholder="min"
-              value={minBudget}
-              onChange={(e) => setMinBudget(e.target.value)}
-            />
-          </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Max budget</div>
-            <input
-              className={inputCls}
-              placeholder="max"
-              value={maxBudget}
-              onChange={(e) => setMaxBudget(e.target.value)}
-            />
-          </div>
         </div>
 
-        {/* Hotels */}
-        <div className="mt-4 grid md:grid-cols-[auto_1fr_1fr_1fr] gap-3 items-end">
-          <label className="flex items-center gap-2 font-semibold text-slate-700">
+        {/* Row 4: budgets + hotel */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-sm font-semibold mb-1">Min budget</label>
+            <input
+              placeholder="min"
+              className="w-full rounded-lg border px-3 py-2"
+              value={payload.minBudget ?? ""}
+              onChange={(e) => setField("minBudget", e.target.value ? Number(e.target.value) : "")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">Max budget</label>
+            <input
+              placeholder="max"
+              className="w-full rounded-lg border px-3 py-2"
+              value={payload.maxBudget ?? ""}
+              onChange={(e) => setField("maxBudget", e.target.value ? Number(e.target.value) : "")}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">Hotel check-in</label>
+            <input
+              type="date"
+              disabled={!payload.includeHotel}
+              value={payload.hotelCheckIn}
+              onChange={(e) => setField("hotelCheckIn", e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 disabled:bg-gray-100"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">Hotel check-out</label>
+            <input
+              type="date"
+              disabled={!payload.includeHotel}
+              value={payload.hotelCheckOut}
+              onChange={(e) => setField("hotelCheckOut", e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 disabled:bg-gray-100"
+            />
+          </div>
+          <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={includeHotel}
-              onChange={(e) => setIncludeHotel(e.target.checked)}
+              checked={payload.includeHotel}
+              onChange={(e) => setField("includeHotel", e.target.checked)}
             />
-            Include hotel
+            <span>Include hotel</span>
           </label>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-in</div>
-            <input
-              className={inputCls}
-              type="date"
-              value={hotelIn}
-              onChange={(e) => setHotelIn(e.target.value)}
-            />
-          </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-out</div>
-            <input
-              className={inputCls}
-              type="date"
-              value={hotelOut}
-              onChange={(e) => setHotelOut(e.target.value)}
-            />
-          </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Min hotel stars</div>
+          <div className="md:col-start-4">
+            <label className="block text-sm font-semibold mb-1">Min hotel stars</label>
             <select
-              className={inputCls}
-              value={minStars}
-              onChange={(e) => setMinStars(e.target.value)}
+              disabled={!payload.includeHotel}
+              className="w-full rounded-lg border px-3 py-2 disabled:bg-gray-100"
+              value={payload.minHotelStar ?? "Any"}
+              onChange={(e) => setField("minHotelStar", (e.target.value as any) || "Any")}
             >
-              <option value="">Any</option>
-              <option value="2">2★</option>
-              <option value="3">3★</option>
-              <option value="4">4★</option>
-              <option value="5">5★</option>
+              <option>Any</option>
+              <option value={3}>3+</option>
+              <option value={4}>4+</option>
+              <option value={5}>5</option>
             </select>
           </div>
         </div>
 
-        {/* Sort row */}
-        <div className="mt-4">
-          <div className="font-semibold text-slate-700 text-sm mb-1">Sort by (basis)</div>
-          <div className="flex gap-2 flex-wrap">
-            <button style={{ ...chipBase, ...chipActive }}>Flight only</button>
-            <button style={{ ...chipBase }}>Bundle total</button>
+        {/* basis toggle */}
+        <div className="flex flex-wrap items-center gap-3 pt-2">
+          <span className="text-sm font-semibold mr-2">Sort by (basis)</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setBasis("flight")}
+              className={`px-3 py-1 rounded-full border ${basis === "flight" ? "bg-cyan-100 border-cyan-400" : ""}`}
+            >
+              Flight only
+            </button>
+            <button
+              type="button"
+              onClick={() => setBasis("bundle")}
+              className={`px-3 py-1 rounded-full border ${basis === "bundle" ? "bg-cyan-100 border-cyan-400" : ""}`}
+            >
+              Bundle total
+            </button>
           </div>
         </div>
-      </section>
+      </form>
 
-      {/* bottom toolbar (chips row) */}
-      <div className="mb-3 rounded-full border bg-white px-3 py-2 flex gap-2 flex-wrap items-center">
-        <button style={{ ...chipBase, background: "#e0f2fe", borderColor: "#7dd3fc", color: "#0369a1" }}>
-          Best overall
-        </button>
-        <button style={chipBase}>Cheapest</button>
-        <button style={chipBase}>Fastest</button>
-        <button style={chipBase}>Flexible</button>
-        <button
-          style={{ ...chipBase, ...(mode === "top3" ? chipActive : {}) }}
-          onClick={() => setMode("top3")}
-        >
+      {/* pills row */}
+      <div className="flex flex-wrap items-center gap-3 mt-6">
+        {(["best", "cheapest", "fastest", "flexible"] as SortKey[]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setSort(k)}
+            className={`px-4 py-2 rounded-full border ${sort === k ? "bg-cyan-100 border-cyan-400" : ""}`}
+          >
+            {k === "best" ? "Best overall" : k[0].toUpperCase() + k.slice(1)}
+          </button>
+        ))}
+        <button className="px-4 py-2 rounded-full border" onClick={() => setSort("best")} type="button">
           Top-3
         </button>
-        <button
-          style={{ ...chipBase, ...(mode === "all" ? chipActive : {}) }}
-          onClick={() => setMode("all")}
-        >
+        <button className="px-4 py-2 rounded-full border" onClick={() => setSort("best")} type="button">
           All
         </button>
-        <span style={{ ...chipBase, background: "#f1f5f9" }}>Saved: {saved.length}</span>
-        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <input
-            type="checkbox"
-            checked={compare}
-            onChange={(e) => setCompare(e.target.checked)}
-          />
-          Compare
-        </label>
+        {hasSearched && (
+          <>
+            <span className="px-4 py-2 rounded-full border">Saved: 0</span>
+            <label className="flex items-center gap-2 ml-2">
+              <input type="checkbox" checked={compareMode} onChange={(e) => setCompareMode(e.target.checked)} />
+              <span>Compare</span>
+            </label>
+          </>
+        )}
       </div>
 
-      {/* results */}
-      <div className="grid gap-3">
-        {visible.map((pkg) => (
+      {/* ======= RESULTS (hidden until searched) ======= */}
+      <section className="mt-6">
+        {!hasSearched && (
+          <p className="text-sm text-gray-600">
+            Start by entering Origin, Destination, and dates, then click Search.
+          </p>
+        )}
+        {hasSearched && isLoading && <p className="text-sm">Searching…</p>}
+        {hasSearched && !isLoading && results.length === 0 && (
+          <p className="text-sm">Showing 0 result(s). Run a search to see flights here.</p>
+        )}
+        {results.map((r, idx) => (
           <ResultCard
-            key={pkg.id}
-            pkg={pkg}
-            currency={currency}
-            compareMode={compare} // master toggle drives card chip visibility
-            passengersCount={passengersTotal}
-            onSave={(id: string) =>
-              setSaved((arr) => (arr.includes(id) ? arr : arr.concat(id)))
-            }
+            key={idx}
+            data={r}
+            compareEnabled={compareMode}
+            onBook={() => {
+              const q = new URLSearchParams({
+                adults: String(payload.adults),
+                children: String(payload.children),
+                infants: String(payload.infants),
+              }).toString();
+              window.location.href = `/checkout?${q}`;
+            }}
           />
         ))}
-      </div>
+      </section>
     </main>
   );
 }
