@@ -1,6 +1,8 @@
 ﻿"use client";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
 function PassengerBlock({ index }: { index: number }) {
@@ -40,13 +42,20 @@ function PassengerBlock({ index }: { index: number }) {
   );
 }
 
-export default function CheckoutPage() {
+function CheckoutInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const adults = Number(sp.get("adults") || 1);
+
+  const adults = Number(sp.get("adults") || sp.get("count") || 1);
   const children = Number(sp.get("children") || 0);
   const infants = Number(sp.get("infants") || 0);
-  const total = adults + children + infants;
+  const total = Math.max(1, adults + children + infants);
+
+  const airline = sp.get("airline") || "Airline";
+  const from = sp.get("from") || "";
+  const to = sp.get("to") || "";
+  const out = sp.get("out") || "";
+  const ret = sp.get("ret") || "";
 
   const passengers = useMemo(() => Array.from({ length: total }), [total]);
   const [saveDetails, setSaveDetails] = useState(true);
@@ -61,8 +70,10 @@ export default function CheckoutPage() {
         </div>
       </div>
 
-      <h1 className="text-3xl font-semibold mb-4">Passenger details</h1>
-      <p className="text-gray-600 mb-6">Enter traveler information exactly as it appears on your ID.</p>
+      <h1 className="text-3xl font-semibold mb-1">Passenger details</h1>
+      <p className="text-gray-600 mb-6">
+        {from && to ? `${from} → ${to}` : ""} {out ? ` • Depart ${out}` : ""} {ret ? ` • Return ${ret}` : ""}
+      </p>
 
       <section className="rounded-2xl border p-4 md:p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">Contact</h2>
@@ -91,7 +102,7 @@ export default function CheckoutPage() {
         <div className="flex items-center justify-between">
           <button className="px-4 py-2 rounded-lg bg-cyan-100 border">Pay &amp; Book (Sandbox)</button>
           <div className="text-right">
-            <div className="text-sm text-gray-600 mb-1">United</div>
+            <div className="text-sm text-gray-600 mb-1">{airline}</div>
             <div className="text-xl font-semibold">$0.00 <span className="text-sm">USD</span></div>
           </div>
         </div>
@@ -100,5 +111,13 @@ export default function CheckoutPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<main className="max-w-5xl mx-auto px-4 pb-16"><p>Loading…</p></main>}>
+      <CheckoutInner />
+    </Suspense>
   );
 }
