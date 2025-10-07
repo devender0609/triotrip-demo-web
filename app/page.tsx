@@ -70,7 +70,7 @@ export default function Page() {
   const [minStars, setMinStars] = useState("");
 
   const [mode, setMode] = useState<"top3" | "all">("top3");
-  const [compare, setCompare] = useState(false); // master compare toggle
+  const [compare, setCompare] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
 
   const passengersTotal = adults + children + infants;
@@ -80,14 +80,12 @@ export default function Page() {
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<Pkg[]>([]);
 
-  // disable Search until required fields present
   const disabledSearch = useMemo(() => {
     if (!originCode || !destCode || !depart) return true;
     if (roundTrip && !ret) return true;
     return false;
   }, [originCode, destCode, depart, roundTrip, ret]);
 
-  // demo result generator (only used when you click Search)
   function makeDemoResults(): Pkg[] {
     const mkSeg = (from: string, to: string, dur: number, iso: string) => ({
       from,
@@ -136,21 +134,14 @@ export default function Page() {
     }));
   }
 
-  // handle Search
   async function onSearch(e: React.MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
     setHasSearched(true);
     setIsLoading(true);
-
-    // TODO: Replace this block with your real API call to /api/search
-    // const res = await fetch("/api/search", { method: "POST", body: JSON.stringify(payload) });
-    // const data = await res.json();
-    // setResults(data.items);
-
     setTimeout(() => {
       setResults(makeDemoResults());
       setIsLoading(false);
-    }, 300); // tiny delay to show the loading state
+    }, 200);
   }
 
   const visible = mode === "top3" ? results.slice(0, 3) : results;
@@ -166,7 +157,16 @@ export default function Page() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
-      <h1 className="text-3xl font-extrabold mb-3">Find your perfect trip</h1>
+      {/* top right links like Figure 2 */}
+      <header className="flex items-center justify-between mb-2">
+        <a className="text-2xl font-semibold hover:underline" href="/">TripTrio</a>
+        <nav className="flex items-center gap-6 text-sm">
+          <a className="hover:underline" href="#">Saved</a>
+          <a className="hover:underline" href="#">Login</a>
+        </nav>
+      </header>
+
+      <h1 className="text-3xl md:text-4xl font-extrabold mb-3">Find your perfect trip</h1>
 
       {/* badges */}
       <div className="mb-3 flex gap-2">
@@ -176,11 +176,11 @@ export default function Page() {
         <span style={chipBase}>Bookable</span>
       </div>
 
-      {/* search card */}
+      {/* search card – 12-col grid so desktop matches Figure 2 */}
       <section className="rounded-2xl border bg-white p-4 mb-4">
-        {/* Origin / Destination */}
-        <div className="grid md:grid-cols-[1fr_auto_1fr] gap-3">
-          <div>
+        <div className="grid grid-cols-1 md:grid-cols-12 md:gap-4 gap-3">
+          {/* Row 1: Origin ⇄ Destination */}
+          <div className="md:col-span-5">
             <div className="font-semibold text-slate-700 text-sm mb-1">Origin</div>
             <AirportField
               id="origin"
@@ -195,17 +195,18 @@ export default function Page() {
             />
           </div>
 
-          <div className="flex items-end justify-center md:pb-0 pb-2">
+          <div className="md:col-span-2 flex items-end justify-center md:pb-0 pb-2">
             <button
               className="px-3 py-2 rounded-lg border"
               title="Swap"
               onClick={swapAirports}
+              type="button"
             >
-              ↔
+              ⇄
             </button>
           </div>
 
-          <div>
+          <div className="md:col-span-5">
             <div className="font-semibold text-slate-700 text-sm mb-1">Destination</div>
             <AirportField
               id="destination"
@@ -219,13 +220,11 @@ export default function Page() {
               }}
             />
           </div>
-        </div>
 
-        {/* Trip + dates + pax + search (one row on md+) */}
-        <div className="mt-4 grid md:grid-cols-[auto_1fr_1fr_auto] gap-3">
-          <div>
+          {/* Row 2: Trip / Dates / Passengers / Search */}
+          <div className="md:col-span-2">
             <div className="font-semibold text-slate-700 text-sm mb-1">Trip</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "nowrap" }}>
+            <div className="flex gap-2">
               <button
                 style={{ ...chipBase, ...(!roundTrip ? chipActive : {}) }}
                 onClick={() => setRoundTrip(false)}
@@ -243,57 +242,56 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Depart</div>
-              <input className={inputCls} type="date" value={depart} onChange={(e) => setDepart(e.target.value)} />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Return</div>
-              <input
-                className={`${inputCls} disabled:bg-slate-50`}
-                type="date"
-                disabled={!roundTrip}
-                value={ret}
-                onChange={(e) => setRet(e.target.value)}
-              />
-            </div>
+          <div className="md:col-span-2">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Depart</div>
+            <input className={inputCls} type="date" value={depart} onChange={(e) => setDepart(e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Adults</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={1}
-                value={adults}
-                onChange={(e) => setAdults(Math.max(1, Number(e.target.value || 1)))}
-              />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Children</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={0}
-                value={children}
-                onChange={(e) => setChildren(Math.max(0, Number(e.target.value || 0)))}
-              />
-            </div>
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Infants</div>
-              <input
-                className={inputCls}
-                type="number"
-                min={0}
-                value={infants}
-                onChange={(e) => setInfants(Math.max(0, Number(e.target.value || 0)))}
-              />
-            </div>
+          <div className="md:col-span-2">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Return</div>
+            <input
+              className={`${inputCls} disabled:bg-slate-50`}
+              type="date"
+              disabled={!roundTrip}
+              value={ret}
+              onChange={(e) => setRet(e.target.value)}
+            />
           </div>
 
-          <div className="flex items-end">
+          <div className="md:col-span-2">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Adults</div>
+            <input
+              className={inputCls}
+              type="number"
+              min={1}
+              value={adults}
+              onChange={(e) => setAdults(Math.max(1, Number(e.target.value || 1)))}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Children</div>
+            <input
+              className={inputCls}
+              type="number"
+              min={0}
+              value={children}
+              onChange={(e) => setChildren(Math.max(0, Number(e.target.value || 0)))}
+            />
+          </div>
+
+          <div className="md:col-span-1">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Infants</div>
+            <input
+              className={inputCls}
+              type="number"
+              min={0}
+              value={infants}
+              onChange={(e) => setInfants(Math.max(0, Number(e.target.value || 0)))}
+            />
+          </div>
+
+          <div className="md:col-span-1 flex items-end">
             <button
               style={{ ...chipBase, ...chipActive, padding: "10px 18px", borderRadius: 12, opacity: disabledSearch ? 0.6 : 1 }}
               onClick={onSearch}
@@ -303,11 +301,9 @@ export default function Page() {
               {isLoading ? "Searching…" : "Search"}
             </button>
           </div>
-        </div>
 
-        {/* Cabin / Stops / Flags */}
-        <div className="mt-4 grid md:grid-cols-2 gap-3">
-          <div>
+          {/* Row 3: Cabin / Stops / Flags */}
+          <div className="md:col-span-3">
             <div className="font-semibold text-slate-700 text-sm mb-1">Cabin</div>
             <select className={inputCls} value={cabin} onChange={(e) => setCabin(e.target.value as Cabin)}>
               <option value="ECONOMY">Economy</option>
@@ -316,42 +312,33 @@ export default function Page() {
               <option value="FIRST">First</option>
             </select>
           </div>
-          <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end">
-            <div>
-              <div className="font-semibold text-slate-700 text-sm mb-1">Stops</div>
-              <select
-                className={inputCls}
-                value={String(stops)}
-                onChange={(e) => setStops(Number(e.target.value) as 0 | 1 | 2 | 3)}
-              >
-                <option value="0">Non-stop</option>
-                <option value="1">1 stop</option>
-                <option value="2">2 stops</option>
-                <option value="3">More than 1 stop</option>
-              </select>
-            </div>
+
+          <div className="md:col-span-3">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Stops</div>
+            <select
+              className={inputCls}
+              value={String(stops)}
+              onChange={(e) => setStops(Number(e.target.value) as 0 | 1 | 2 | 3)}
+            >
+              <option value="0">Non-stop</option>
+              <option value="1">1 stop</option>
+              <option value="2">2 stops</option>
+              <option value="3">More than 1 stop</option>
+            </select>
+          </div>
+
+          <div className="md:col-span-3 flex items-end gap-6">
             <label className="flex items-center gap-2 font-semibold text-slate-700">
-              <input
-                type="checkbox"
-                checked={refundable}
-                onChange={(e) => setRefundable(e.target.checked)}
-              />
+              <input type="checkbox" checked={refundable} onChange={(e) => setRefundable(e.target.checked)} />
               Refundable
             </label>
             <label className="flex items-center gap-2 font-semibold text-slate-700">
-              <input
-                type="checkbox"
-                checked={greener}
-                onChange={(e) => setGreener(e.target.checked)}
-              />
+              <input type="checkbox" checked={greener} onChange={(e) => setGreener(e.target.checked)} />
               Greener
             </label>
           </div>
-        </div>
 
-        {/* Currency / Budgets */}
-        <div className="mt-4 grid md:grid-cols-3 gap-3">
-          <div>
+          <div className="md:col-span-3">
             <div className="font-semibold text-slate-700 text-sm mb-1">Currency</div>
             <select className={inputCls} value={currency} onChange={(e) => setCurrency(e.target.value)}>
               <option>USD</option>
@@ -359,57 +346,46 @@ export default function Page() {
               <option>INR</option>
             </select>
           </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Min budget</div>
-            <input
-              className={inputCls}
-              placeholder="min"
-              value={minBudget}
-              onChange={(e) => setMinBudget(e.target.value)}
-            />
-          </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Max budget</div>
-            <input
-              className={inputCls}
-              placeholder="max"
-              value={maxBudget}
-              onChange={(e) => setMaxBudget(e.target.value)}
-            />
-          </div>
-        </div>
 
-        {/* Hotels */}
-        <div className="mt-4 grid md:grid-cols-[auto_1fr_1fr_1fr] gap-3 items-end">
-          <label className="flex items-center gap-2 font-semibold text-slate-700">
-            <input
-              type="checkbox"
-              checked={includeHotel}
-              onChange={(e) => setIncludeHotel(e.target.checked)}
-            />
-            Include hotel
-          </label>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-in</div>
-            <input
-              className={`${inputCls} disabled:bg-slate-50`}
-              type="date"
-              value={hotelIn}
-              onChange={(e) => setHotelIn(e.target.value)}
-              disabled={!includeHotel}
-            />
+          {/* Row 4: Budgets + Hotel */}
+          <div className="md:col-span-3">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Min budget</div>
+            <input className={inputCls} placeholder="min" value={minBudget} onChange={(e) => setMinBudget(e.target.value)} />
           </div>
-          <div>
-            <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-out</div>
-            <input
-              className={`${inputCls} disabled:bg-slate-50`}
-              type="date"
-              value={hotelOut}
-              onChange={(e) => setHotelOut(e.target.value)}
-              disabled={!includeHotel}
-            />
+
+          <div className="md:col-span-3">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Max budget</div>
+            <input className={inputCls} placeholder="max" value={maxBudget} onChange={(e) => setMaxBudget(e.target.value)} />
           </div>
-          <div>
+
+          <div className="md:col-span-6 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            <label className="flex items-center gap-2 font-semibold text-slate-700">
+              <input type="checkbox" checked={includeHotel} onChange={(e) => setIncludeHotel(e.target.checked)} />
+              Include hotel
+            </label>
+            <div>
+              <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-in</div>
+              <input
+                className={`${inputCls} disabled:bg-slate-50`}
+                type="date"
+                disabled={!includeHotel}
+                value={hotelIn}
+                onChange={(e) => setHotelIn(e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="font-semibold text-slate-700 text-sm mb-1">Hotel check-out</div>
+              <input
+                className={`${inputCls} disabled:bg-slate-50`}
+                type="date"
+                disabled={!includeHotel}
+                value={hotelOut}
+                onChange={(e) => setHotelOut(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="md:col-span-3">
             <div className="font-semibold text-slate-700 text-sm mb-1">Min hotel stars</div>
             <select
               className={`${inputCls} disabled:bg-slate-50`}
@@ -424,19 +400,19 @@ export default function Page() {
               <option value="5">5★</option>
             </select>
           </div>
-        </div>
 
-        {/* Sort row */}
-        <div className="mt-4">
-          <div className="font-semibold text-slate-700 text-sm mb-1">Sort by (basis)</div>
-          <div className="flex gap-2 flex-wrap">
-            <button style={{ ...chipBase, ...chipActive }} type="button">Flight only</button>
-            <button style={{ ...chipBase }} type="button">Bundle total</button>
+          {/* Row 5: Sort basis */}
+          <div className="md:col-span-12">
+            <div className="font-semibold text-slate-700 text-sm mb-1">Sort by (basis)</div>
+            <div className="flex gap-2 flex-wrap">
+              <button style={{ ...chipBase, ...chipActive }} type="button">Flight only</button>
+              <button style={{ ...chipBase }} type="button">Bundle total</button>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* bottom toolbar (chips row) */}
+      {/* chips row like Figure 2 */}
       <div className="mb-3 rounded-full border bg-white px-3 py-2 flex gap-2 flex-wrap items-center">
         <button style={{ ...chipBase, background: "#e0f2fe", borderColor: "#7dd3fc", color: "#0369a1" }}>
           Best overall
@@ -444,31 +420,17 @@ export default function Page() {
         <button style={chipBase}>Cheapest</button>
         <button style={chipBase}>Fastest</button>
         <button style={chipBase}>Flexible</button>
-        <button
-          style={{ ...chipBase, ...(mode === "top3" ? chipActive : {}) }}
-          onClick={() => setMode("top3")}
-          type="button"
-        >
+        <button style={{ ...chipBase, ...(mode === "top3" ? chipActive : {}) }} onClick={() => setMode("top3")} type="button">
           Top-3
         </button>
-        <button
-          style={{ ...chipBase, ...(mode === "all" ? chipActive : {}) }}
-          onClick={() => setMode("all")}
-          type="button"
-        >
+        <button style={{ ...chipBase, ...(mode === "all" ? chipActive : {}) }} onClick={() => setMode("all")} type="button">
           All
         </button>
-
-        {/* Only show Saved/Compare after a search */}
         {hasSearched && (
           <>
             <span style={{ ...chipBase, background: "#f1f5f9" }}>Saved: {saved.length}</span>
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <input
-                type="checkbox"
-                checked={compare}
-                onChange={(e) => setCompare(e.target.checked)}
-              />
+              <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
               Compare
             </label>
           </>
@@ -491,11 +453,9 @@ export default function Page() {
             key={pkg.id}
             pkg={pkg}
             currency={currency}
-            compareMode={compare} // master toggle drives card chip visibility
+            compareMode={compare}
             passengersCount={passengersTotal}
-            onSave={(id: string) =>
-              setSaved((arr) => (arr.includes(id) ? arr : arr.concat(id)))
-            }
+            onSave={(id: string) => setSaved((arr) => (arr.includes(id) ? arr : arr.concat(id)))}
           />
         ))}
       </div>
